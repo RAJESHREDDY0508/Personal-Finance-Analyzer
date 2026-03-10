@@ -66,6 +66,8 @@ dev = [
     "ruff>=0.5.0",
     "mypy>=1.10.0",
     "types-stripe",
+    # In-memory SQLite driver used by CI tests (no real Postgres needed)
+    "aiosqlite>=0.20.0",
 ]
 
 [tool.setuptools.packages.find]

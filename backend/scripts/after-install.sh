@@ -30,7 +30,7 @@ DB_PORT=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sy
 DB_USER=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('username','pfa_user'))")
 DB_PASS=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('password',''))")
 
-# SSM parameters (using get-parameters for efficiency)
+# SSM parameters helper
 fetch_ssm() {
   aws ssm get-parameter \
     --name "/pfa/${STAGE}/$1" \
@@ -45,9 +45,17 @@ STRIPE_SECRET_KEY=$(fetch_ssm "stripe-secret-key")
 STRIPE_WEBHOOK_SECRET=$(fetch_ssm "stripe-webhook-secret")
 STRIPE_PRICE_ID=$(fetch_ssm "stripe-price-id")
 SES_SENDER_EMAIL=$(fetch_ssm "ses-sender-email")
-KAFKA_SERVERS=$(fetch_ssm "kafka-bootstrap-servers")
-DOMAIN_NAME=$(fetch_ssm "domain-name")
 OPENAI_API_KEY=$(fetch_ssm "openai-api-key")
+DOMAIN_NAME=$(fetch_ssm "domain-name")
+
+# SQS queue URLs from SSM (stored by data-stack CDK)
+SQS_STATEMENT_UPLOADED=$(fetch_ssm "sqs/statement-uploaded-url")
+SQS_STATEMENT_PARSED=$(fetch_ssm "sqs/statement-parsed-url")
+SQS_TRANSACTIONS_CATEGORIZED=$(fetch_ssm "sqs/transactions-categorized-url")
+SQS_ANOMALIES_DETECTED=$(fetch_ssm "sqs/anomalies-detected-url")
+SQS_REPORT_SCHEDULE=$(fetch_ssm "sqs/report-schedule-url")
+SQS_REPORT_GENERATED=$(fetch_ssm "sqs/report-generated-url")
+SQS_SUBSCRIPTION_EVENTS=$(fetch_ssm "sqs/subscription-events-url")
 
 FRONTEND_URL="https://${DOMAIN_NAME:-placeholder.example.com}"
 
@@ -73,9 +81,15 @@ STRIPE_PREMIUM_PRICE_ID=${STRIPE_PRICE_ID}
 SES_SENDER_EMAIL=${SES_SENDER_EMAIL}
 SES_SENDER_NAME=AI Finance Analyzer
 
-KAFKA_BOOTSTRAP_SERVERS=${KAFKA_SERVERS}
-
 OPENAI_API_KEY=${OPENAI_API_KEY}
+
+SQS_STATEMENT_UPLOADED_URL=${SQS_STATEMENT_UPLOADED}
+SQS_STATEMENT_PARSED_URL=${SQS_STATEMENT_PARSED}
+SQS_TRANSACTIONS_CATEGORIZED_URL=${SQS_TRANSACTIONS_CATEGORIZED}
+SQS_ANOMALIES_DETECTED_URL=${SQS_ANOMALIES_DETECTED}
+SQS_REPORT_SCHEDULE_URL=${SQS_REPORT_SCHEDULE}
+SQS_REPORT_GENERATED_URL=${SQS_REPORT_GENERATED}
+SQS_SUBSCRIPTION_EVENTS_URL=${SQS_SUBSCRIPTION_EVENTS}
 
 FRONTEND_URL=${FRONTEND_URL}
 EOF
