@@ -305,90 +305,109 @@ export class PfaAppStack extends cdk.Stack {
     // Keep TS happy — suppress unused-variable warnings
     void httpsListener;
 
-    // ── CloudFront Distribution ───────────────────────────────
-    // OAC for the frontend S3 bucket (replaces legacy OAI)
-    const frontendOac = new cloudfront.S3OriginAccessControl(this, "FrontendOac", {
-      description: `PFA frontend OAC - ${stage}`,
-    });
+    // ── CloudFront Distribution (optional) ───────────────────
+    // Skip CloudFront when --context skipCloudFront=true is passed.
+    // New AWS accounts sometimes need account verification before CloudFront
+    // can be used.  In that case deploy with skipCloudFront=true and access
+    // the app directly via the ALB DNS name on port 8080.
+    // Once your account is verified, redeploy without the flag to add CloudFront.
+    const skipCloudFront =
+      (this.node.tryGetContext("skipCloudFront") as string | undefined) === "true";
 
-    const apiOriginPort = domainName ? 443 : 8080;
-    const apiOriginProtocol = domainName
-      ? cloudfront.OriginProtocolPolicy.HTTPS_ONLY
-      : cloudfront.OriginProtocolPolicy.HTTP_ONLY;
+    if (!skipCloudFront) {
+      const frontendOac = new cloudfront.S3OriginAccessControl(this, "FrontendOac", {
+        description: `PFA frontend OAC - ${stage}`,
+      });
 
-    const albOrigin = new origins.LoadBalancerV2Origin(alb, {
-      protocolPolicy: apiOriginProtocol,
-      httpPort: apiOriginPort,
-      httpsPort: 443,
-      readTimeout: cdk.Duration.seconds(60),
-    });
+      const apiOriginPort = domainName ? 443 : 8080;
+      const apiOriginProtocol = domainName
+        ? cloudfront.OriginProtocolPolicy.HTTPS_ONLY
+        : cloudfront.OriginProtocolPolicy.HTTP_ONLY;
 
-    const distribution = new cloudfront.Distribution(this, "PfaDistribution", {
-      comment: `PFA ${stage} distribution`,
-      // Frontend SPA served from S3 (bucket and distribution are in this stack)
-      defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(frontendBucket, {
-          originAccessControl: frontendOac,
-        }),
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
-        compress: true,
-      },
-      additionalBehaviors: {
-        // API requests forwarded to ALB — no caching
-        "/api/*": {
-          origin: albOrigin,
+      const albOrigin = new origins.LoadBalancerV2Origin(alb, {
+        protocolPolicy: apiOriginProtocol,
+        httpPort: apiOriginPort,
+        httpsPort: 443,
+        readTimeout: cdk.Duration.seconds(60),
+      });
+
+      const distribution = new cloudfront.Distribution(this, "PfaDistribution", {
+        comment: `PFA ${stage} distribution`,
+        defaultBehavior: {
+          origin: origins.S3BucketOrigin.withOriginAccessControl(frontendBucket, {
+            originAccessControl: frontendOac,
+          }),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+          compress: true,
         },
-      },
-      // SPA routing: return index.html for all 404s
-      errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: "/index.html",
-          ttl: cdk.Duration.seconds(0),
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: "/index.html",
-          ttl: cdk.Duration.seconds(0),
-        },
-      ],
-      ...(domainName && cert
-        ? {
-            domainNames: [domainName, `www.${domainName}`],
-            certificate: new acm.Certificate(this, "CfCert", {
-              domainName,
-              subjectAlternativeNames: [`www.${domainName}`],
-              validation: acm.CertificateValidation.fromDns(),
-            }),
-          }
-        : {}),
-      priceClass: isProd
-        ? cloudfront.PriceClass.PRICE_CLASS_ALL
-        : cloudfront.PriceClass.PRICE_CLASS_100,
-    });
-    this.distributionDomainName = distribution.distributionDomainName;
-
-    // Grant CloudFront OAC read access to the frontend bucket.
-    // Both bucket and distribution are in this stack, so addToResourcePolicy is safe.
-    frontendBucket.addToResourcePolicy(
-      new iam.PolicyStatement({
-        principals: [new iam.ServicePrincipal("cloudfront.amazonaws.com")],
-        actions: ["s3:GetObject"],
-        resources: [frontendBucket.arnForObjects("*")],
-        conditions: {
-          StringEquals: {
-            "AWS:SourceArn": `arn:${this.partition}:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
+        additionalBehaviors: {
+          "/api/*": {
+            origin: albOrigin,
+            viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+            cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+            originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
           },
         },
-      })
-    );
+        errorResponses: [
+          {
+            httpStatus: 403,
+            responseHttpStatus: 200,
+            responsePagePath: "/index.html",
+            ttl: cdk.Duration.seconds(0),
+          },
+          {
+            httpStatus: 404,
+            responseHttpStatus: 200,
+            responsePagePath: "/index.html",
+            ttl: cdk.Duration.seconds(0),
+          },
+        ],
+        ...(domainName && cert
+          ? {
+              domainNames: [domainName, `www.${domainName}`],
+              certificate: new acm.Certificate(this, "CfCert", {
+                domainName,
+                subjectAlternativeNames: [`www.${domainName}`],
+                validation: acm.CertificateValidation.fromDns(),
+              }),
+            }
+          : {}),
+        priceClass: isProd
+          ? cloudfront.PriceClass.PRICE_CLASS_ALL
+          : cloudfront.PriceClass.PRICE_CLASS_100,
+      });
+      this.distributionDomainName = distribution.distributionDomainName;
+
+      frontendBucket.addToResourcePolicy(
+        new iam.PolicyStatement({
+          principals: [new iam.ServicePrincipal("cloudfront.amazonaws.com")],
+          actions: ["s3:GetObject"],
+          resources: [frontendBucket.arnForObjects("*")],
+          conditions: {
+            StringEquals: {
+              "AWS:SourceArn": `arn:${this.partition}:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
+            },
+          },
+        })
+      );
+
+      new cdk.CfnOutput(this, "CloudFrontDomain", {
+        value: distribution.distributionDomainName,
+        description: "CloudFront distribution domain",
+      });
+      new cdk.CfnOutput(this, "CloudFrontDistributionId", {
+        value: distribution.distributionId,
+        description: "CloudFront distribution ID — for cache invalidations",
+      });
+    } else {
+      this.distributionDomainName = alb.loadBalancerDnsName;
+      new cdk.CfnOutput(this, "AppUrl", {
+        value: `http://${alb.loadBalancerDnsName}:8080`,
+        description: "Direct ALB URL (CloudFront skipped — pending account verification)",
+      });
+    }
 
     // ── CodeDeploy ────────────────────────────────────────────
     const codeDeployApp = new codedeploy.ServerApplication(this, "CodeDeployApp", {
@@ -496,15 +515,7 @@ export class PfaAppStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "AlbDnsName", {
       value: alb.loadBalancerDnsName,
-      description: "ALB DNS — use this as CloudFront origin",
-    });
-    new cdk.CfnOutput(this, "CloudFrontDomain", {
-      value: distribution.distributionDomainName,
-      description: "CloudFront distribution domain",
-    });
-    new cdk.CfnOutput(this, "CloudFrontDistributionId", {
-      value: distribution.distributionId,
-      description: "CloudFront distribution ID — for cache invalidations",
+      description: "ALB DNS name",
     });
     new cdk.CfnOutput(this, "CodeDeployAppName", {
       value: codeDeployApp.applicationName,
@@ -516,8 +527,8 @@ export class PfaAppStack extends cdk.Stack {
       value: alarmTopic.topicArn,
     });
 
-    if (domainName) {
-      new cdk.CfnOutput(this, "AppUrl", {
+    if (domainName && !skipCloudFront) {
+      new cdk.CfnOutput(this, "CustomDomainUrl", {
         value: `https://${domainName}`,
         description: "Production application URL",
       });
