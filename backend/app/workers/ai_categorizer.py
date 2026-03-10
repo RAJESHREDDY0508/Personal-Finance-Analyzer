@@ -1,8 +1,8 @@
 """
 AI Categorizer Worker.
 
-Consumes: statement.parsed
-Produces: transactions.categorized
+Consumes: statement.parsed        (SQS)
+Produces: transactions.categorized (SQS)
 
 For each parsed statement:
   1. Load all uncategorized transactions (category IS NULL)
@@ -17,8 +17,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.database import engine
-from app.kafka.producer import kafka_producer
-from app.kafka.topics import Topics
+from app.sqs.producer import sqs_producer
+from app.sqs.queues import Queues
 from app.models.transaction import Transaction
 from app.services.ai_service import categorize_batch
 from app.workers.base_worker import BaseWorker
@@ -29,10 +29,9 @@ BATCH_SIZE = 50
 
 
 class AiCategorizerWorker(BaseWorker):
-    """Kafka consumer that AI-categorizes newly parsed transactions."""
+    """SQS consumer that AI-categorizes newly parsed transactions."""
 
-    topic = Topics.STATEMENT_PARSED
-    group_id = "ai-categorizer-group"
+    queue_url_fn = Queues.statement_parsed
 
     async def process_message(self, payload: dict) -> None:
         statement_id = uuid.UUID(payload["statement_id"])
@@ -86,13 +85,12 @@ class AiCategorizerWorker(BaseWorker):
                             )
                         )
 
-            await kafka_producer.send(
-                topic=Topics.TRANSACTIONS_CATEGORIZED,
+            await sqs_producer.send(
+                queue_url=Queues.transactions_categorized(),
                 payload={
                     "statement_id": str(statement_id),
                     "user_id": user_id_str,
                     "transaction_count": len(txns),
                 },
-                key=str(statement_id),
             )
             log.info("transactions.categorized published", count=len(txns))

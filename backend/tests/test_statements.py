@@ -1,6 +1,6 @@
 """
 Integration tests for the statements endpoints.
-S3 and Kafka calls are mocked so tests run without AWS credentials.
+S3 and SQS calls are mocked so tests run without AWS credentials.
 """
 from unittest.mock import AsyncMock, patch
 
@@ -43,7 +43,7 @@ async def test_upload_success_csv(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
-        patch("app.api.v1.statements.kafka_producer.send", new_callable=AsyncMock) as mock_kafka,
+        patch("app.api.v1.statements.sqs_producer.send", new_callable=AsyncMock) as mock_sqs,
     ):
         mock_s3.return_value = PRESIGNED_STUB
         resp = await client.post(
@@ -57,7 +57,7 @@ async def test_upload_success_csv(client: AsyncClient) -> None:
     assert data["upload_url"] == PRESIGNED_STUB["url"]
     assert data["s3_key"].endswith(".csv")
     mock_s3.assert_called_once()
-    mock_kafka.assert_called_once()
+    mock_sqs.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -77,14 +77,14 @@ async def test_upload_s3_failure_returns_503(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_kafka_failure_still_returns_201(client: AsyncClient) -> None:
+async def test_upload_sqs_failure_still_returns_201(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
         patch(
-            "app.api.v1.statements.kafka_producer.send",
+            "app.api.v1.statements.sqs_producer.send",
             new_callable=AsyncMock,
-            side_effect=Exception("Kafka down"),
+            side_effect=Exception("SQS down"),
         ),
     ):
         mock_s3.return_value = PRESIGNED_STUB
@@ -111,7 +111,7 @@ async def test_list_statements_after_upload(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
-        patch("app.api.v1.statements.kafka_producer.send", new_callable=AsyncMock),
+        patch("app.api.v1.statements.sqs_producer.send", new_callable=AsyncMock),
     ):
         mock_s3.return_value = PRESIGNED_STUB
         await client.post(
@@ -140,7 +140,7 @@ async def test_get_statement_success(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
-        patch("app.api.v1.statements.kafka_producer.send", new_callable=AsyncMock),
+        patch("app.api.v1.statements.sqs_producer.send", new_callable=AsyncMock),
     ):
         mock_s3.return_value = PRESIGNED_STUB
         upload_resp = await client.post(
@@ -160,7 +160,7 @@ async def test_delete_statement(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
-        patch("app.api.v1.statements.kafka_producer.send", new_callable=AsyncMock),
+        patch("app.api.v1.statements.sqs_producer.send", new_callable=AsyncMock),
         patch("app.api.v1.statements.delete_object", new_callable=AsyncMock),
     ):
         mock_s3.return_value = PRESIGNED_STUB
@@ -181,7 +181,7 @@ async def test_reprocess_statement(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
-        patch("app.api.v1.statements.kafka_producer.send", new_callable=AsyncMock) as mock_kafka,
+        patch("app.api.v1.statements.sqs_producer.send", new_callable=AsyncMock) as mock_sqs,
     ):
         mock_s3.return_value = PRESIGNED_STUB
         upload_resp = await client.post(
@@ -190,11 +190,11 @@ async def test_reprocess_statement(client: AsyncClient) -> None:
             headers=headers,
         )
         statement_id = upload_resp.json()["statement_id"]
-        mock_kafka.reset_mock()
+        mock_sqs.reset_mock()
         reprocess_resp = await client.post(
             f"/api/v1/statements/{statement_id}/reprocess",
             headers=headers,
         )
     assert reprocess_resp.status_code == 200
     assert reprocess_resp.json()["status"] == "pending"
-    mock_kafka.assert_called_once()
+    mock_sqs.assert_called_once()

@@ -1,7 +1,7 @@
 """
 Suggestion engine worker.
 
-Consumes: anomalies.detected
+Consumes: anomalies.detected (SQS)
 Action:   Generates savings suggestions for the user and persists them.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import uuid
 import structlog
 
 from app.database import AsyncSessionLocal as async_session_factory
-from app.kafka.topics import Topics
+from app.sqs.queues import Queues
 from app.services.suggestion_service import generate_suggestions_for_user
 from app.workers.base_worker import BaseWorker
 
@@ -19,8 +19,7 @@ logger = structlog.get_logger(__name__)
 
 
 class SuggestionEngineWorker(BaseWorker):
-    topic = Topics.ANOMALIES_DETECTED
-    group_id = "suggestion-engine-group"
+    queue_url_fn = Queues.anomalies_detected
 
     async def process_message(self, payload: dict) -> None:
         user_id_str: str | None = payload.get("user_id")

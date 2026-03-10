@@ -1,7 +1,7 @@
 """
 Report generator worker.
-Consumes: report.schedule
-Publishes: report.generated
+Consumes: report.schedule  (SQS)
+Publishes: report.generated (SQS)
 
 Payload schema (report.schedule):
   {
@@ -20,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
-from app.kafka.producer import kafka_producer
-from app.kafka.topics import Topics
+from app.sqs.producer import sqs_producer
+from app.sqs.queues import Queues
 from app.models.user import User
 from app.services.report_service import generate_monthly_report
 from app.workers.base_worker import BaseWorker
@@ -30,8 +30,7 @@ logger = structlog.get_logger(__name__)
 
 
 class ReportGeneratorWorker(BaseWorker):
-    topic = Topics.REPORT_SCHEDULE
-    group_id = "report-generator-group"
+    queue_url_fn = Queues.report_schedule
 
     async def process_message(self, payload: dict) -> None:
         user_id = uuid.UUID(str(payload["user_id"]))
@@ -72,8 +71,8 @@ class ReportGeneratorWorker(BaseWorker):
                 )
 
             # Publish to report.generated so email sender picks it up
-            await kafka_producer.send(
-                Topics.REPORT_GENERATED,
+            await sqs_producer.send(
+                queue_url=Queues.report_generated(),
                 payload={
                     "user_id": str(user_id),
                     "report_id": str(report.id),
@@ -83,7 +82,6 @@ class ReportGeneratorWorker(BaseWorker):
                     "user_name": user.full_name,
                     "s3_key": report.s3_key,
                 },
-                key=str(user_id),
             )
             logger.info(
                 "Report generated — report.generated event published",

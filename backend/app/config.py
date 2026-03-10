@@ -39,9 +39,15 @@ class Settings(BaseSettings):
     s3_reports_bucket: str = "pfa-reports-dev"
     s3_presigned_url_expiry: int = 3600
 
-    # ── Kafka ────────────────────────────────────────────────
-    kafka_bootstrap_servers: str = "localhost:9092"
-    kafka_consumer_group_id: str = "pfa-workers"
+    # ── SQS Queue URLs (empty → feature disabled in local dev without LocalStack) ──
+    sqs_statement_uploaded_url: str = ""
+    sqs_statement_parsed_url: str = ""
+    sqs_transactions_categorized_url: str = ""
+    sqs_anomalies_detected_url: str = ""
+    sqs_report_schedule_url: str = ""
+    sqs_report_generated_url: str = ""
+    sqs_subscription_events_url: str = ""
+
 
     # ── Stripe ───────────────────────────────────────────────
     stripe_secret_key: str = ""

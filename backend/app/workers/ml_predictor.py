@@ -1,7 +1,7 @@
 """
 ML predictor worker.
 
-Consumes: transactions.categorized
+Consumes: transactions.categorized (SQS)
 Action:   Runs ML budget predictions for the user and upserts into budgets table.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import uuid
 import structlog
 
 from app.database import AsyncSessionLocal as async_session_factory
-from app.kafka.topics import Topics
+from app.sqs.queues import Queues
 from app.services.ml_service import predict_spending_for_user
 from app.workers.base_worker import BaseWorker
 
@@ -19,8 +19,7 @@ logger = structlog.get_logger(__name__)
 
 
 class MlPredictorWorker(BaseWorker):
-    topic = Topics.TRANSACTIONS_CATEGORIZED
-    group_id = "ml-predictor-group"
+    queue_url_fn = Queues.transactions_categorized
 
     async def process_message(self, payload: dict) -> None:
         user_id_str: str | None = payload.get("user_id")

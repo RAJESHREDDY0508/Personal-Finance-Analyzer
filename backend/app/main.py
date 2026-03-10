@@ -1,6 +1,9 @@
 """
 FastAPI application factory.
-Registers routers, middleware, lifespan events (Kafka producer startup/shutdown).
+Registers routers, middleware, and lifespan events.
+
+SQS is stateless (no persistent broker connection) so the lifespan handler
+only needs to log startup / shutdown messages — no producer to start or stop.
 """
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
@@ -17,31 +20,9 @@ logger = structlog.get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """
-    Startup / shutdown logic.
-    - Start Kafka producer on startup
-    - Close Kafka producer on shutdown
-    """
+    """Startup / shutdown lifecycle hook."""
     logger.info("Starting AI Finance Analyzer API", environment=settings.environment)
-
-    # ── Startup ─────────────────────────────────────────────
-    try:
-        from app.kafka.producer import kafka_producer
-        await kafka_producer.start()
-        logger.info("Kafka producer started")
-    except Exception as e:
-        logger.warning("Kafka producer failed to start (non-fatal in dev)", error=str(e))
-
-    yield  # App runs here
-
-    # ── Shutdown ─────────────────────────────────────────────
-    try:
-        from app.kafka.producer import kafka_producer
-        await kafka_producer.stop()
-        logger.info("Kafka producer stopped")
-    except Exception as e:
-        logger.warning("Kafka producer shutdown error", error=str(e))
-
+    yield
     logger.info("API shutdown complete")
 
 

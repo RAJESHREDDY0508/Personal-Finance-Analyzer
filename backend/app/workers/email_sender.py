@@ -1,6 +1,6 @@
 """
 Email sender worker.
-Consumes: report.generated
+Consumes: report.generated (SQS)
 
 Payload schema (report.generated):
   {
@@ -23,7 +23,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
-from app.kafka.topics import Topics
+from app.sqs.queues import Queues
 from app.models.report import MonthlyReport
 from app.models.user import User
 from app.services.analytics_service import get_dashboard_overview, get_spending_by_category
@@ -35,8 +35,7 @@ logger = structlog.get_logger(__name__)
 
 
 class EmailSenderWorker(BaseWorker):
-    topic = Topics.REPORT_GENERATED
-    group_id = "email-sender-group"
+    queue_url_fn = Queues.report_generated
 
     async def process_message(self, payload: dict) -> None:
         user_id = uuid.UUID(str(payload["user_id"]))

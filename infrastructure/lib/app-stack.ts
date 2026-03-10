@@ -147,6 +147,21 @@ export class PfaAppStack extends cdk.Stack {
       })
     );
 
+    // SQS — workers send/receive/delete messages on all PFA queues
+    ec2Role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility",
+        ],
+        resources: [`arn:aws:sqs:*:*:pfa-*-${stage}`],
+      })
+    );
+
     // ── EC2 User Data ─────────────────────────────────────────
     // Runs once at instance launch. Installs dependencies and the
     // CodeDeploy agent (which handles subsequent app deployments).

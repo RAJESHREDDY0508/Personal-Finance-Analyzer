@@ -22,54 +22,6 @@ services:
     networks:
       - pfa-network
 
-  # ─── Kafka (KRaft mode — no Zookeeper) ───────────────────────
-  kafka:
-    image: confluentinc/cp-kafka:7.6.0
-    container_name: pfa_kafka
-    restart: unless-stopped
-    ports:
-      - "9092:9092"   # external (host machine access)
-      - "9093:9093"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      # Two listeners: INTERNAL for container-to-container, EXTERNAL for host access
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_LOG_RETENTION_HOURS: 168
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-    networks:
-      - pfa-network
-
-  # ─── Kafka UI ─────────────────────────────────────────────────
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: pfa_kafka_ui
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092   # internal listener
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - pfa-network
-
   # ─── FastAPI Backend ──────────────────────────────────────────
   backend:
     build:
@@ -83,13 +35,19 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://pfa_user:pfa_password@postgres:5432/pfa_db
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092   # internal Kafka listener
+      # SQS queue URLs: leave empty in local dev (workers will skip gracefully).
+      # In prod these are injected by the EC2 launch template from SSM.
+      SQS_STATEMENT_UPLOADED_URL: ""
+      SQS_STATEMENT_PARSED_URL: ""
+      SQS_TRANSACTIONS_CATEGORIZED_URL: ""
+      SQS_ANOMALIES_DETECTED_URL: ""
+      SQS_REPORT_SCHEDULE_URL: ""
+      SQS_REPORT_GENERATED_URL: ""
+      SQS_SUBSCRIPTION_EVENTS_URL: ""
     # Override Dockerfile CMD for dev: single worker + auto-reload on code changes
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
     depends_on:
       postgres:
-        condition: service_healthy
-      kafka:
         condition: service_healthy
     volumes:
       - ./backend:/app   # live-mount source for hot-reload

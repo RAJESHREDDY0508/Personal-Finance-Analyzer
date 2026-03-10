@@ -1,19 +1,39 @@
 /**
- * Data Stack — RDS PostgreSQL, MSK Kafka, S3 buckets.
+ * Data Stack — RDS PostgreSQL, SQS queues, S3 buckets.
+ *
+ * Replaced MSK Kafka with Amazon SQS. SQS is serverless, deploys in seconds,
+ * requires no broker sizing, and costs fractions of a cent per message.
+ * Each former Kafka topic becomes an SQS queue with a companion DLQ.
+ *
+ * Queue URLs are stored in SSM Parameter Store so the EC2 instances can read
+ * them at startup without hard-coding account IDs.
  */
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as msk from "aws-cdk-lib/aws-msk";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import { Construct } from "constructs";
 
 interface DataStackProps extends cdk.StackProps {
   stage: string;
   vpc: ec2.Vpc;
   dbSecurityGroup: ec2.SecurityGroup;
+  /** Kept for interface compatibility with bin/infrastructure.ts — not used. */
   kafkaSecurityGroup: ec2.SecurityGroup;
+}
+
+/** All SQS queues created by this stack, keyed by logical name. */
+export interface PfaQueues {
+  statementUploaded: sqs.Queue;
+  statementParsed: sqs.Queue;
+  transactionsCategorized: sqs.Queue;
+  anomaliesDetected: sqs.Queue;
+  reportSchedule: sqs.Queue;
+  reportGenerated: sqs.Queue;
+  subscriptionEvents: sqs.Queue;
 }
 
 export class PfaDataStack extends cdk.Stack {
@@ -21,13 +41,12 @@ export class PfaDataStack extends cdk.Stack {
   public readonly statementsBucket: s3.Bucket;
   public readonly reportsBucket: s3.Bucket;
   public readonly artifactsBucket: s3.Bucket;
-  /** Resolves to the MSK TLS bootstrap broker string at deploy time. */
-  public readonly kafkaBootstrapServers: string;
+  public readonly queues: PfaQueues;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
-    const { stage, vpc, dbSecurityGroup, kafkaSecurityGroup } = props;
+    const { stage, vpc, dbSecurityGroup } = props;
     const isProd = stage === "prod";
 
     // ── RDS PostgreSQL ───────────────────────────────────────
@@ -60,49 +79,69 @@ export class PfaDataStack extends cdk.Stack {
       backupRetention: cdk.Duration.days(isProd ? 7 : 1),
       instanceIdentifier: `pfa-db-${stage}`,
       cloudwatchLogsExports: ["postgresql"],
+      // DESTROY skips the final snapshot on deletion — prevents rollback failures
+      // when CloudFormation tries to snapshot an instance still in "creating" state.
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
-    // ── MSK Kafka ─────────────────────────────────────────────
-    // NOTE: MSK costs ~$0.21/hr per m5.large broker. For local development,
-    // use docker-compose Kafka and set KAFKA_BOOTSTRAP_SERVERS=localhost:9092.
-    const privateSubnetIds = vpc
-      .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
-      .subnetIds;
+    // ── SQS Queues (replaced MSK Kafka) ──────────────────────
+    // Helper: create a queue + companion dead-letter queue.
+    const makeQueue = (
+      logicalId: string,
+      queueName: string,
+      visibilityTimeoutSecs: number
+    ): sqs.Queue => {
+      const dlq = new sqs.Queue(this, `${logicalId}Dlq`, {
+        queueName: `pfa-dlq-${queueName}-${stage}`,
+        retentionPeriod: cdk.Duration.days(14),
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
 
-    const kafkaCluster = new msk.CfnCluster(this, "PfaKafka", {
-      clusterName: `pfa-kafka-${stage}`,
-      kafkaVersion: "3.6.0",
-      // prod = 2 brokers (multi-AZ), dev = 1 broker (single-AZ)
-      // NOTE: AWS MSK API requires clientSubnets to have ≥2 entries regardless
-      // of broker count — passing only 1 subnet causes "Specify either two or
-      // three client subnets" error even when numberOfBrokerNodes = 1.
-      numberOfBrokerNodes: isProd ? 2 : 1,
-      brokerNodeGroupInfo: {
-        instanceType: "kafka.m5.large",
-        clientSubnets: privateSubnetIds.slice(0, 2),
-        securityGroups: [kafkaSecurityGroup.securityGroupId],
-        storageInfo: {
-          ebsStorageInfo: { volumeSize: isProd ? 100 : 20 },
-        },
-      },
-      encryptionInfo: {
-        encryptionInTransit: {
-          clientBroker: "TLS_PLAINTEXT",
-          inCluster: true,
-        },
-      },
-      loggingInfo: {
-        brokerLogs: {
-          cloudWatchLogs: {
-            enabled: true,
-            logGroup: `/pfa/${stage}/kafka`,
-          },
-        },
-      },
-    });
+      return new sqs.Queue(this, logicalId, {
+        queueName: `pfa-${queueName}-${stage}`,
+        visibilityTimeout: cdk.Duration.seconds(visibilityTimeoutSecs),
+        retentionPeriod: cdk.Duration.days(4),
+        deadLetterQueue: { queue: dlq, maxReceiveCount: 3 },
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+    };
 
-    // attrBootstrapBrokersTls is a CloudFormation return value; use Fn.getAtt for compatibility
-    this.kafkaBootstrapServers = cdk.Fn.getAtt(kafkaCluster.logicalId, "BootstrapBrokersTls").toString();
+    this.queues = {
+      // statement.uploaded → parser worker (allow 5 min to parse + insert)
+      statementUploaded: makeQueue("StatementUploadedQueue", "statement-uploaded", 300),
+      // statement.parsed → AI categorizer (allow 10 min for GPT batches)
+      statementParsed: makeQueue("StatementParsedQueue", "statement-parsed", 600),
+      // transactions.categorized → anomaly detector + ML predictor
+      transactionsCategorized: makeQueue("TransactionsCategorizedQueue", "transactions-categorized", 300),
+      // anomalies.detected → suggestion engine
+      anomaliesDetected: makeQueue("AnomaliesDetectedQueue", "anomalies-detected", 120),
+      // report.schedule → report generator
+      reportSchedule: makeQueue("ReportScheduleQueue", "report-schedule", 300),
+      // report.generated → email sender
+      reportGenerated: makeQueue("ReportGeneratedQueue", "report-generated", 120),
+      // subscription.events → subscription handler
+      subscriptionEvents: makeQueue("SubscriptionEventsQueue", "subscription-events", 60),
+    };
+
+    // Store queue URLs in SSM so EC2 instances can read them at startup.
+    // The EC2 IAM role in app-stack.ts grants read access to /pfa/{stage}/*.
+    const queueSsmEntries: Array<[string, string, sqs.Queue]> = [
+      ["SsmStatementUploadedUrl",       "statement-uploaded-url",       this.queues.statementUploaded],
+      ["SsmStatementParsedUrl",         "statement-parsed-url",         this.queues.statementParsed],
+      ["SsmTransactionsCategorizedUrl", "transactions-categorized-url", this.queues.transactionsCategorized],
+      ["SsmAnomaliesDetectedUrl",       "anomalies-detected-url",       this.queues.anomaliesDetected],
+      ["SsmReportScheduleUrl",          "report-schedule-url",          this.queues.reportSchedule],
+      ["SsmReportGeneratedUrl",         "report-generated-url",         this.queues.reportGenerated],
+      ["SsmSubscriptionEventsUrl",      "subscription-events-url",      this.queues.subscriptionEvents],
+    ];
+
+    for (const [ssmId, paramSuffix, queue] of queueSsmEntries) {
+      new ssm.StringParameter(this, ssmId, {
+        parameterName: `/pfa/${stage}/sqs/${paramSuffix}`,
+        stringValue: queue.queueUrl,
+        description: `SQS queue URL for ${paramSuffix}`,
+      });
+    }
 
     // ── S3 Buckets ───────────────────────────────────────────
     this.statementsBucket = new s3.Bucket(this, "StatementsBucket", {
@@ -160,8 +199,29 @@ export class PfaDataStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ArtifactsBucketName", {
       value: this.artifactsBucket.bucketName,
     });
-    new cdk.CfnOutput(this, "KafkaBootstrapServers", {
-      value: this.kafkaBootstrapServers,
+
+    // Queue URL outputs for quick reference after deploy
+    new cdk.CfnOutput(this, "SqsStatementUploadedUrl", {
+      value: this.queues.statementUploaded.queueUrl,
+      description: "SQS queue for statement.uploaded events",
+    });
+    new cdk.CfnOutput(this, "SqsStatementParsedUrl", {
+      value: this.queues.statementParsed.queueUrl,
+    });
+    new cdk.CfnOutput(this, "SqsTransactionsCategorizedUrl", {
+      value: this.queues.transactionsCategorized.queueUrl,
+    });
+    new cdk.CfnOutput(this, "SqsAnomaliesDetectedUrl", {
+      value: this.queues.anomaliesDetected.queueUrl,
+    });
+    new cdk.CfnOutput(this, "SqsReportScheduleUrl", {
+      value: this.queues.reportSchedule.queueUrl,
+    });
+    new cdk.CfnOutput(this, "SqsReportGeneratedUrl", {
+      value: this.queues.reportGenerated.queueUrl,
+    });
+    new cdk.CfnOutput(this, "SqsSubscriptionEventsUrl", {
+      value: this.queues.subscriptionEvents.queueUrl,
     });
   }
 }

@@ -3,10 +3,10 @@ Statements router — file upload and management.
 
 Upload flow:
   1. Client POST /upload with {file_name, file_type}
-  2. Backend creates DB record (status=pending), produces to Kafka
+  2. Backend creates DB record (status=pending), publishes to SQS
   3. Backend returns pre-signed S3 URL
   4. Client uploads file directly to S3 (not through the backend)
-  5. Kafka worker processes the file asynchronously
+  5. SQS worker processes the file asynchronously
 """
 import uuid
 
@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.database import get_db
-from app.kafka.producer import kafka_producer
-from app.kafka.topics import Topics
+from app.sqs.producer import sqs_producer
+from app.sqs.queues import Queues
 from app.models.statement import BankStatement
 from app.models.user import User
 from app.schemas.statement import (
@@ -79,22 +79,21 @@ async def upload_statement(
             detail="Storage service unavailable. Please try again later.",
         )
 
-    # Publish to Kafka so the parser worker picks it up after the client uploads
+    # Publish to SQS so the parser worker picks it up after the client uploads
     try:
-        await kafka_producer.send(
-            topic=Topics.STATEMENT_UPLOADED,
+        await sqs_producer.send(
+            queue_url=Queues.statement_uploaded(),
             payload={
                 "statement_id": str(statement.id),
                 "user_id": str(current_user.id),
                 "s3_key": s3_key,
                 "file_type": body.file_type,
             },
-            key=str(statement.id),
         )
     except Exception as exc:
         # Non-fatal: user can manually trigger reprocess later
         logger.warning(
-            "Failed to publish to Kafka — statement queued for manual reprocess",
+            "Failed to publish to SQS — statement queued for manual reprocess",
             statement_id=str(statement.id),
             error=str(exc),
         )
@@ -203,15 +202,14 @@ async def reprocess_statement(
     await db.flush()
 
     try:
-        await kafka_producer.send(
-            topic=Topics.STATEMENT_UPLOADED,
+        await sqs_producer.send(
+            queue_url=Queues.statement_uploaded(),
             payload={
                 "statement_id": str(stmt.id),
                 "user_id": str(current_user.id),
                 "s3_key": stmt.s3_key,
                 "file_type": stmt.file_type,
             },
-            key=str(stmt.id),
         )
     except Exception as exc:
         raise HTTPException(

@@ -1,8 +1,8 @@
 """
 Statement Parser Worker.
 
-Consumes: statement.uploaded
-Produces: statement.parsed
+Consumes: statement.uploaded  (SQS)
+Produces: statement.parsed    (SQS)
 
 Flow per message:
   1. Download file from S3
@@ -15,8 +15,8 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.database import engine
-from app.kafka.producer import kafka_producer
-from app.kafka.topics import Topics
+from app.sqs.producer import sqs_producer
+from app.sqs.queues import Queues
 from app.services.statement_service import (
     bulk_insert_transactions,
     mark_completed,
@@ -32,10 +32,9 @@ logger = structlog.get_logger(__name__)
 
 
 class StatementParserWorker(BaseWorker):
-    """Kafka consumer that parses uploaded bank statement files."""
+    """SQS consumer that parses uploaded bank statement files."""
 
-    topic = Topics.STATEMENT_UPLOADED
-    group_id = "statement-parser-group"
+    queue_url_fn = Queues.statement_uploaded
 
     async def process_message(self, payload: dict) -> None:
         statement_id_str = payload["statement_id"]
@@ -79,14 +78,13 @@ class StatementParserWorker(BaseWorker):
                     await mark_completed(db, statement_id, row_count)
 
                 # 4. Publish to next stage
-                await kafka_producer.send(
-                    topic=Topics.STATEMENT_PARSED,
+                await sqs_producer.send(
+                    queue_url=Queues.statement_parsed(),
                     payload={
                         "statement_id": statement_id_str,
                         "user_id": user_id_str,
                         "transaction_count": row_count,
                     },
-                    key=statement_id_str,
                 )
                 log.info("statement.parsed event published")
 
@@ -99,4 +97,4 @@ class StatementParserWorker(BaseWorker):
                 async with db.begin():
                     await mark_failed(db, statement_id, f"Unexpected error: {exc}")
                 log.exception("Unexpected error during statement processing")
-                raise  # re-raise so Kafka consumer can handle retries
+                raise  # re-raise so SQS visibility timeout handles retry
