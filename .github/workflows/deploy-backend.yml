@@ -84,10 +84,7 @@ jobs:
           DEPLOY_ID=$(aws deploy create-deployment \
             --application-name pfa-api-${STAGE} \
             --deployment-group-name pfa-api-dg-${STAGE} \
-            --s3-location \
-              bucket=pfa-artifacts-${STAGE},\
-              key=backend/backend-${{ github.sha }}.zip,\
-              bundleType=zip \
+            --s3-location "bucket=pfa-artifacts-${STAGE},key=backend/backend-${{ github.sha }}.zip,bundleType=zip" \
             --deployment-config-name CodeDeployDefault.AllAtOnce \
             --description "Deploy ${{ github.sha }} to ${STAGE}" \
             --auto-rollback-configuration enabled=true,events=DEPLOYMENT_FAILURE \
