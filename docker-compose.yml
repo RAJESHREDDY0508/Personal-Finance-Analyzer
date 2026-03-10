@@ -1,0 +1,131 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: pfa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pfa_user
+      POSTGRES_PASSWORD: pfa_password
+      POSTGRES_DB: pfa_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pfa_user -d pfa_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pfa-network
+
+  # ─── Kafka (KRaft mode — no Zookeeper) ───────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: pfa_kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"   # external (host machine access)
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Two listeners: INTERNAL for container-to-container, EXTERNAL for host access
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - pfa-network
+
+  # ─── Kafka UI ─────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: pfa_kafka_ui
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092   # internal listener
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - pfa-network
+
+  # ─── FastAPI Backend ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pfa_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pfa_user:pfa_password@postgres:5432/pfa_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092   # internal Kafka listener
+    # Override Dockerfile CMD for dev: single worker + auto-reload on code changes
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app   # live-mount source for hot-reload
+    networks:
+      - pfa-network
+
+  # ─── Next.js Frontend ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pfa_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000   # browser-side URL (Docker port-forwarded)
+    # Override Dockerfile CMD for dev: next dev for hot-reload + turbopack
+    command: npm run dev
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app        # live-mount source for hot-reload
+      - /app/node_modules      # preserve container node_modules (don't overwrite with host)
+      - /app/.next             # preserve build cache between restarts
+    networks:
+      - pfa-network
+
+# ─── Volumes ──────────────────────────────────────────────────
+volumes:
+  pgdata:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────────────
+networks:
+  pfa-network:
+    driver: bridge

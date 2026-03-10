@@ -1,0 +1,142 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Deployment stage"
+        required: true
+        default: "dev"
+        type: choice
+        options: [dev, staging, prod]
+
+env:
+  STAGE: ${{ github.event.inputs.stage || 'dev' }}
+  AWS_REGION: us-east-1
+
+jobs:
+  # ── Run tests before deploying ────────────────────────────────
+  test:
+    name: Backend tests (pre-deploy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install & test
+        working-directory: backend
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          JWT_SECRET_KEY: "ci-test-secret-key-32-chars-long!"
+          JWT_REFRESH_SECRET_KEY: "ci-refresh-secret-32-chars-long!"
+          STRIPE_SECRET_KEY: "sk_test_placeholder"
+          STRIPE_WEBHOOK_SECRET: "whsec_placeholder"
+          STRIPE_PREMIUM_PRICE_ID: "price_placeholder"
+          AWS_ACCESS_KEY_ID: "fake"
+          AWS_SECRET_ACCESS_KEY: "fake"
+        run: |
+          pip install -e ".[dev]" --quiet
+          python -m pytest -q
+
+  # ── Package and deploy via CodeDeploy ─────────────────────────
+  deploy:
+    name: Deploy to EC2 (${{ github.event.inputs.stage || 'dev' }})
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Package backend
+        run: |
+          cd backend
+          zip -r ../backend-${{ github.sha }}.zip . \
+            --exclude "*.pyc" \
+            --exclude "__pycache__/*" \
+            --exclude ".pytest_cache/*" \
+            --exclude "*.egg-info/*" \
+            --exclude "coverage.xml" \
+            --exclude ".env"
+
+      - name: Upload package to S3
+        run: |
+          aws s3 cp backend-${{ github.sha }}.zip \
+            s3://pfa-artifacts-${STAGE}/backend/backend-${{ github.sha }}.zip
+
+      - name: Create CodeDeploy deployment
+        id: codedeploy
+        run: |
+          DEPLOY_ID=$(aws deploy create-deployment \
+            --application-name pfa-api-${STAGE} \
+            --deployment-group-name pfa-api-dg-${STAGE} \
+            --s3-location \
+              bucket=pfa-artifacts-${STAGE},\
+              key=backend/backend-${{ github.sha }}.zip,\
+              bundleType=zip \
+            --deployment-config-name CodeDeployDefault.AllAtOnce \
+            --description "Deploy ${{ github.sha }} to ${STAGE}" \
+            --auto-rollback-configuration enabled=true,events=DEPLOYMENT_FAILURE \
+            --query deploymentId --output text)
+          echo "deployment_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+          echo "Deployment ID: $DEPLOY_ID"
+
+      - name: Wait for deployment to complete
+        run: |
+          aws deploy wait deployment-successful \
+            --deployment-id ${{ steps.codedeploy.outputs.deployment_id }}
+          echo "Deployment ${{ steps.codedeploy.outputs.deployment_id }} succeeded"
+
+      - name: Run database migrations
+        run: |
+          # Trigger Alembic migration via SSM Run Command on an EC2 instance
+          INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names pfa-asg-${STAGE} \
+            --query 'AutoScalingGroups[0].Instances[0].InstanceId' \
+            --output text)
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["cd /opt/pfa && source /etc/pfa/env && python3.12 -m alembic upgrade head"]}' \
+            --comment "Run Alembic migrations for ${{ github.sha }}" \
+            --query 'Command.CommandId' --output text)
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID"
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'Status' --output text)
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Migration failed with status: $STATUS"
+            exit 1
+          fi
+          echo "Database migrations completed successfully"
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ Deployed ${{ github.sha }} to ${STAGE}"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ Deployment of ${{ github.sha }} to ${STAGE} FAILED"

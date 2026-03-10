@@ -1,0 +1,24 @@
+{
+  "name": "pfa-infrastructure",
+  "version": "0.1.0",
+  "description": "AWS CDK infrastructure for AI Personal Finance Analyzer",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all",
+    "diff": "cdk diff",
+    "synth": "cdk synth"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.150.0",
+    "typescript": "~5.5.0",
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.150.0",
+    "constructs": "^10.3.0"
+  }
+}

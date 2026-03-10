@@ -1,0 +1,49 @@
+[Unit]
+Description=PFA FastAPI Application
+Documentation=https://github.com/your-org/ai-personal-finance-analyzer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pfa
+Group=pfa
+WorkingDirectory=/opt/pfa
+
+# Environment loaded from file written by CodeDeploy after-install hook
+EnvironmentFile=/etc/pfa/env
+
+# Uvicorn: 4 workers for t3.medium (2 vCPU), 2 for t3.small
+ExecStart=/usr/local/bin/uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 4 \
+    --log-level info \
+    --access-log \
+    --proxy-headers \
+    --forwarded-allow-ips "*"
+
+# Graceful shutdown — wait for in-flight requests (max 30s)
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Logging — forward to journald (collected by CloudWatch agent)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pfa-api
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/pfa /tmp
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

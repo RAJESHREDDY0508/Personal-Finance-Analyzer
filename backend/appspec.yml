@@ -1,0 +1,51 @@
+version: 0.0
+os: linux
+
+# Copy all backend files to /opt/pfa, excluding tests and cache
+files:
+  - source: /
+    destination: /opt/pfa
+    overwrite: yes
+
+# File permissions
+permissions:
+  - object: /opt/pfa
+    owner: pfa
+    group: pfa
+    mode: "755"
+    type:
+      - directory
+  - object: /opt/pfa
+    owner: pfa
+    group: pfa
+    mode: "644"
+    type:
+      - file
+  - object: /opt/pfa/scripts
+    owner: root
+    group: root
+    mode: "755"
+    type:
+      - file
+
+# Deployment lifecycle hooks
+hooks:
+  BeforeInstall:
+    - location: scripts/before-install.sh
+      timeout: 60
+      runas: root
+
+  AfterInstall:
+    - location: scripts/after-install.sh
+      timeout: 300
+      runas: root
+
+  ApplicationStart:
+    - location: scripts/start-server.sh
+      timeout: 60
+      runas: root
+
+  ValidateService:
+    - location: scripts/validate-service.sh
+      timeout: 30
+      runas: root

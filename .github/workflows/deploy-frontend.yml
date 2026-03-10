@@ -1,0 +1,100 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Deployment stage"
+        required: true
+        default: "dev"
+        type: choice
+        options: [dev, staging, prod]
+
+env:
+  STAGE: ${{ github.event.inputs.stage || 'dev' }}
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: Build & deploy frontend (${{ github.event.inputs.stage || 'dev' }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve stage-specific environment variables
+        id: env
+        run: |
+          # Pull the API URL from SSM Parameter Store for this stage
+          API_URL=$(aws ssm get-parameter \
+            --name "/pfa/${STAGE}/api-url" \
+            --query Parameter.Value --output text 2>/dev/null \
+            || echo "https://placeholder.example.com")
+          echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Build (static export)
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ steps.env.outputs.api_url }}
+        run: npm run build
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/out s3://pfa-frontend-${STAGE}/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html"
+
+          # HTML files must not be cached (for SPA routing)
+          aws s3 sync frontend/out s3://pfa-frontend-${STAGE}/ \
+            --delete \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --include "*.html"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name PfaApp-${STAGE} \
+            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
+            --output text)
+
+          if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
+            INVALIDATION_ID=$(aws cloudfront create-invalidation \
+              --distribution-id "$DISTRIBUTION_ID" \
+              --paths "/*" \
+              --query 'Invalidation.Id' --output text)
+            echo "CloudFront invalidation created: $INVALIDATION_ID"
+          else
+            echo "CloudFront distribution ID not found — skipping invalidation"
+          fi
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Frontend deployed to pfa-frontend-${STAGE}"
+          echo "Commit: ${{ github.sha }}"
