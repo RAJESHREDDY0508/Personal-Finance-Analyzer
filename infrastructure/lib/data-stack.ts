@@ -73,12 +73,13 @@ export class PfaDataStack extends cdk.Stack {
       clusterName: `pfa-kafka-${stage}`,
       kafkaVersion: "3.6.0",
       // prod = 2 brokers (multi-AZ), dev = 1 broker (single-AZ)
+      // NOTE: AWS MSK API requires clientSubnets to have ≥2 entries regardless
+      // of broker count — passing only 1 subnet causes "Specify either two or
+      // three client subnets" error even when numberOfBrokerNodes = 1.
       numberOfBrokerNodes: isProd ? 2 : 1,
       brokerNodeGroupInfo: {
         instanceType: "kafka.m5.large",
-        clientSubnets: isProd
-          ? privateSubnetIds.slice(0, 2)
-          : [privateSubnetIds[0]],
+        clientSubnets: privateSubnetIds.slice(0, 2),
         securityGroups: [kafkaSecurityGroup.securityGroupId],
         storageInfo: {
           ebsStorageInfo: { volumeSize: isProd ? 100 : 20 },
