@@ -101,6 +101,10 @@ EOF
 chmod 640 /etc/pfa/env
 chown root:pfa /etc/pfa/env
 
+# ── Make deployment scripts executable ───────────────────────
+# appspec.yml sets all /opt/pfa files to mode 644; restore exec bit for scripts
+chmod +x /opt/pfa/scripts/*.sh
+
 # ── Install systemd service ───────────────────────────────────
 echo "[after-install] Installing pfa-api systemd service"
 cp /opt/pfa/pfa-api.service /etc/systemd/system/pfa-api.service

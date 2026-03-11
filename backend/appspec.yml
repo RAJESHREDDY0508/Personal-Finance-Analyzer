@@ -8,6 +8,10 @@ files:
     overwrite: yes
 
 # File permissions
+# NOTE: only one permissions entry per (object + type) combination is allowed.
+# Using two entries that both match the same file (e.g. /opt/pfa/scripts/foo.sh)
+# causes an "specified more than once" error at Install time.
+# Scripts are made executable in after-install.sh instead.
 permissions:
   - object: /opt/pfa
     owner: pfa
@@ -19,12 +23,6 @@ permissions:
     owner: pfa
     group: pfa
     mode: "644"
-    type:
-      - file
-  - object: /opt/pfa/scripts
-    owner: root
-    group: root
-    mode: "755"
     type:
       - file
 
