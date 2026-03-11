@@ -70,10 +70,12 @@ export default function UploadPage() {
           ([k, v]) => form.append(k, v)
         );
         form.append("file", file);
+        // Upload directly to S3
         await axios.post(data.upload_url, form);
-        toast.success("File uploaded — redirecting to analysis…");
+        // Only AFTER S3 confirms → tell backend to enqueue SQS (no NoSuchKey race)
+        await api.post(`/statements/${data.statement_id}/confirm`);
+        toast.success("File uploaded — opening analysis…");
         qc.invalidateQueries({ queryKey: ["statements"] });
-        // Redirect to the per-statement analysis page
         router.push(`/analysis?id=${data.statement_id}`);
       } catch {
         toast.error("Upload failed — please try again");
@@ -98,9 +100,10 @@ export default function UploadPage() {
   const reprocess = useMutation({
     mutationFn: (id: string) =>
       api.post(`/statements/${id}/reprocess`).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       toast.success("Reprocessing started");
       qc.invalidateQueries({ queryKey: ["statements"] });
+      router.push(`/analysis?id=${id}`);
     },
   });
 

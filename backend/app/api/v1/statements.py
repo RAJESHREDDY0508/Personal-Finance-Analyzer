@@ -79,24 +79,9 @@ async def upload_statement(
             detail="Storage service unavailable. Please try again later.",
         )
 
-    # Publish to SQS so the parser worker picks it up after the client uploads
-    try:
-        await sqs_producer.send(
-            queue_url=Queues.statement_uploaded(),
-            payload={
-                "statement_id": str(statement.id),
-                "user_id": str(current_user.id),
-                "s3_key": s3_key,
-                "file_type": body.file_type,
-            },
-        )
-    except Exception as exc:
-        # Non-fatal: user can manually trigger reprocess later
-        logger.warning(
-            "Failed to publish to SQS — statement queued for manual reprocess",
-            statement_id=str(statement.id),
-            error=str(exc),
-        )
+    # NOTE: SQS is NOT published here — the client must call POST /{id}/confirm
+    # after the S3 upload succeeds. This prevents the worker from trying to
+    # download a file that hasn't landed in S3 yet (NoSuchKey race condition).
 
     logger.info(
         "Statement upload initiated",
@@ -111,6 +96,46 @@ async def upload_statement(
         upload_fields=presigned["fields"],
         s3_key=s3_key,
     )
+
+
+# ── POST /{id}/confirm ────────────────────────────────────────
+# Called by the client AFTER the S3 upload succeeds. Only then do we
+# enqueue the SQS message so the worker never gets a NoSuchKey error.
+
+@router.post(
+    "/{statement_id}/confirm",
+    response_model=StatementResponse,
+    summary="Confirm S3 upload complete and trigger processing",
+)
+async def confirm_upload(
+    statement_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StatementResponse:
+    stmt = await get_statement(db, statement_id, current_user.id)
+    if stmt is None:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    if stmt.status not in ("pending",):
+        # Already queued / processing — idempotent OK
+        return StatementResponse.model_validate(stmt)
+
+    try:
+        await sqs_producer.send(
+            queue_url=Queues.statement_uploaded(),
+            payload={
+                "statement_id": str(stmt.id),
+                "user_id": str(current_user.id),
+                "s3_key": stmt.s3_key,
+                "file_type": stmt.file_type,
+            },
+        )
+    except Exception as exc:
+        logger.error("Failed to publish to SQS", statement_id=str(statement_id), error=str(exc))
+        raise HTTPException(status_code=503, detail="Could not queue for processing. Try again.")
+
+    logger.info("Statement confirmed and queued", statement_id=str(statement_id))
+    return StatementResponse.model_validate(stmt)
 
 
 # ── GET / ─────────────────────────────────────────────────────
