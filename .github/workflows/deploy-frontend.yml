@@ -79,10 +79,11 @@ jobs:
 
       - name: Invalidate CloudFront cache
         run: |
+          # Gracefully skip if CloudFront distribution hasn't been deployed yet.
           DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
             --stack-name PfaApp-${STAGE} \
             --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-            --output text)
+            --output text 2>/dev/null || echo "")
 
           if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
             INVALIDATION_ID=$(aws cloudfront create-invalidation \
@@ -91,7 +92,7 @@ jobs:
               --query 'Invalidation.Id' --output text)
             echo "CloudFront invalidation created: $INVALIDATION_ID"
           else
-            echo "CloudFront distribution ID not found — skipping invalidation"
+            echo "No CloudFront distribution found — skipping invalidation"
           fi
 
       - name: Deployment summary
