@@ -7,6 +7,7 @@ import {
   DollarSign,
   AlertTriangle,
   Activity,
+  Heart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import StatCard from "@/components/stat-card";
@@ -25,6 +26,18 @@ const fmt = (n: number) =>
 
 const today = new Date();
 const qp = `year=${today.getFullYear()}&month=${today.getMonth() + 1}`;
+
+function healthColor(score: number) {
+  if (score >= 70) return "text-green-600 dark:text-green-400";
+  if (score >= 40) return "text-yellow-600 dark:text-yellow-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function healthLabel(score: number) {
+  if (score >= 70) return "Great";
+  if (score >= 40) return "Fair";
+  return "Needs attention";
+}
 
 export default function DashboardPage() {
   const overview = useQuery({
@@ -51,7 +64,13 @@ export default function DashboardPage() {
       api.get("/dashboard/savings-rate?months=6").then((r) => r.data),
   });
 
+  const profile = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => api.get("/users/me").then((r) => r.data),
+  });
+
   const ov = overview.data;
+  const healthScore: number = profile.data?.health_score ?? 0;
 
   return (
     <div className="space-y-6">
@@ -94,6 +113,46 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {/* Health score banner */}
+      {!profile.isLoading && (
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted shrink-0">
+                <Heart className={`h-6 w-6 ${healthColor(healthScore)}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Financial Health Score</p>
+                <p className="text-xs text-muted-foreground">
+                  {healthLabel(healthScore)} — based on your spending and savings patterns
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                <span
+                  className={`text-3xl font-bold tabular-nums ${healthColor(healthScore)}`}
+                >
+                  {healthScore}
+                </span>
+                <span className="text-muted-foreground text-sm">/100</span>
+              </div>
+            </div>
+            {/* Progress bar */}
+            <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  healthScore >= 70
+                    ? "bg-green-500"
+                    : healthScore >= 40
+                    ? "bg-yellow-500"
+                    : "bg-red-500"
+                }`}
+                style={{ width: `${Math.min(100, Math.max(0, healthScore))}%` }}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts row */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

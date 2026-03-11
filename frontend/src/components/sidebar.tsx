@@ -10,6 +10,7 @@ import {
   PiggyBank,
   Settings,
   TrendingUp,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,17 +23,20 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}
+
+export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
 
-  return (
-    <aside className="flex h-screen w-56 flex-col border-r bg-sidebar shrink-0">
+  const navLinks = (
+    <>
       {/* Logo */}
-      <div className="flex items-center gap-2 px-4 py-5 border-b">
+      <div className="flex items-center gap-2 px-4 py-5 border-b shrink-0">
         <TrendingUp className="h-5 w-5 text-primary" />
-        <span className="font-semibold text-sm tracking-tight">
-          Finance AI
-        </span>
+        <span className="font-semibold text-sm tracking-tight">Finance AI</span>
       </div>
 
       {/* Navigation */}
@@ -43,6 +47,7 @@ export default function Sidebar() {
             <Link
               key={href}
               href={href}
+              onClick={onClose}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 active
@@ -56,6 +61,41 @@ export default function Sidebar() {
           );
         })}
       </nav>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex h-screen w-56 flex-col border-r bg-sidebar shrink-0">
+        {navLinks}
+      </aside>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Mobile drawer */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full w-56 flex-col border-r bg-sidebar transition-transform duration-200 md:hidden",
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1 rounded-md text-sidebar-foreground hover:bg-sidebar-accent"
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </button>
+        {navLinks}
+      </aside>
+    </>
   );
 }

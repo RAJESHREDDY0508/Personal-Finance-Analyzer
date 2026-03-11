@@ -1,0 +1,77 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3ArtifactsAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::pfa-artifacts-dev",
+        "arn:aws:s3:::pfa-artifacts-dev/*",
+        "arn:aws:s3:::pfa-artifacts-staging",
+        "arn:aws:s3:::pfa-artifacts-staging/*",
+        "arn:aws:s3:::pfa-artifacts-prod",
+        "arn:aws:s3:::pfa-artifacts-prod/*",
+        "arn:aws:s3:::pfa-frontend-dev",
+        "arn:aws:s3:::pfa-frontend-dev/*",
+        "arn:aws:s3:::pfa-frontend-staging",
+        "arn:aws:s3:::pfa-frontend-staging/*",
+        "arn:aws:s3:::pfa-frontend-prod",
+        "arn:aws:s3:::pfa-frontend-prod/*"
+      ]
+    },
+    {
+      "Sid": "CodeDeployAccess",
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:GetDeployment",
+        "codedeploy:GetDeploymentConfig",
+        "codedeploy:GetApplicationRevision",
+        "codedeploy:RegisterApplicationRevision",
+        "codedeploy:ListDeployments"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:us-east-1:*:deploymentgroup:pfa-api-*/*",
+        "arn:aws:codedeploy:us-east-1:*:application:pfa-api-*",
+        "arn:aws:codedeploy:us-east-1:*:deploymentconfig:*"
+      ]
+    },
+    {
+      "Sid": "SSMMigrations",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations"
+      ],
+      "Resource": [
+        "arn:aws:ssm:us-east-1:*:document/AWS-RunShellScript",
+        "arn:aws:ec2:us-east-1:*:instance/*",
+        "arn:aws:ssm:us-east-1:*:*"
+      ]
+    },
+    {
+      "Sid": "AutoScalingDescribe",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudFrontInvalidation",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetDistribution",
+        "cloudfront:ListDistributions"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

@@ -81,12 +81,20 @@ export default function LoginPage() {
             {login.isPending ? "Signing in…" : "Sign in"}
           </Button>
 
-          <p className="text-center text-sm text-muted-foreground">
-            No account?{" "}
-            <Link href="/register" className="text-primary hover:underline">
-              Register
+          <div className="flex flex-col gap-1 text-center text-sm text-muted-foreground">
+            <Link
+              href="/forgot-password"
+              className="text-primary hover:underline"
+            >
+              Forgot password?
             </Link>
-          </p>
+            <span>
+              No account?{" "}
+              <Link href="/register" className="text-primary hover:underline">
+                Register
+              </Link>
+            </span>
+          </div>
         </form>
       </CardContent>
     </Card>

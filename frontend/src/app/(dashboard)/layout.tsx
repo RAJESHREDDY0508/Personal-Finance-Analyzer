@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import Sidebar from "@/components/sidebar";
@@ -13,6 +13,7 @@ export default function DashboardLayout({
 }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const router = useRouter();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!accessToken) {
@@ -24,9 +25,12 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar />
+      <Sidebar
+        mobileOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
       <div className="flex flex-col flex-1 overflow-hidden">
-        <Header />
+        <Header onMenuToggle={() => setSidebarOpen((o) => !o)} />
         <main className="flex-1 overflow-y-auto p-6 bg-muted/20">
           {children}
         </main>
