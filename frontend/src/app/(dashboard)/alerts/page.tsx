@@ -34,12 +34,12 @@ export default function AlertsPage() {
   const anomalies = useQuery<AnomalyTransaction[]>({
     queryKey: ["anomalies"],
     queryFn: () =>
-      api.get("/transactions/?is_anomaly=true&limit=50").then((r) => r.data),
+      api.get("/transactions?is_anomaly=true&limit=50").then((r) => r.data.items ?? r.data),
   });
 
   const suggestions = useQuery<{ suggestions: Suggestion[]; total: number }>({
     queryKey: ["suggestions"],
-    queryFn: () => api.get("/suggestions/").then((r) => r.data),
+    queryFn: () => api.get("/suggestions").then((r) => r.data),
     retry: false,           // premium-only — 402 means no access
   });
 

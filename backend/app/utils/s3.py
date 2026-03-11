@@ -17,13 +17,17 @@ logger = structlog.get_logger(__name__)
 
 @lru_cache(maxsize=1)
 def _get_s3_client() -> Any:
-    """Return a cached boto3 S3 client."""
-    return boto3.client(
-        "s3",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-    )
+    """Return a cached boto3 S3 client.
+
+    Uses explicit credentials only when configured; otherwise falls back to
+    the EC2 instance role / credential chain (IAM role, env vars, etc.).
+    """
+    kwargs: dict[str, Any] = {"region_name": settings.aws_region}
+    if settings.aws_access_key_id:
+        kwargs["aws_access_key_id"] = settings.aws_access_key_id
+    if settings.aws_secret_access_key:
+        kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+    return boto3.client("s3", **kwargs)
 
 
 def _run_sync(func):

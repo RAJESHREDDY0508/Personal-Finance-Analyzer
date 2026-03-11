@@ -81,7 +81,7 @@ export default function TransactionsPage() {
       });
       if (categoryFilter !== "All") params.set("category", categoryFilter);
       if (search.trim()) params.set("search", search.trim());
-      return api.get(`/transactions/?${params}`).then((r) => {
+      return api.get(`/transactions?${params}`).then((r) => {
         // Handle both paginated {items, total} and plain array responses
         if (Array.isArray(r.data)) {
           return { items: r.data, total: r.data.length, page: 1, pages: 1 };

@@ -69,7 +69,7 @@ export default function BudgetPage() {
 
   const budgets = useQuery<BudgetItem[]>({
     queryKey: ["budgets"],
-    queryFn: () => api.get("/budgets/").then((r) => r.data),
+    queryFn: () => api.get("/budgets").then((r) => r.data),
   });
 
   const predictions = useQuery<{ predictions: Prediction[]; count: number }>({
@@ -84,7 +84,7 @@ export default function BudgetPage() {
 
   const setBudget = useMutation({
     mutationFn: () =>
-      api.post("/budgets/", {
+      api.post("/budgets", {
         category,
         month: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`,
         monthly_limit: parseFloat(limit),

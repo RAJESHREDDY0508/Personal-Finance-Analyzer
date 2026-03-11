@@ -24,7 +24,7 @@ interface Statement {
   file_name: string;
   status: string;
   row_count: number | null;
-  created_at: string;
+  uploaded_at: string;
 }
 
 const BADGE: Record<string, "secondary" | "outline" | "default" | "destructive"> = {
@@ -40,7 +40,7 @@ export default function UploadPage() {
 
   const statements = useQuery<Statement[]>({
     queryKey: ["statements"],
-    queryFn: () => api.get("/statements/").then((r) => r.data),
+    queryFn: () => api.get("/statements").then((r) => r.data.statements ?? r.data),
     refetchInterval: (query) => {
       const data = (query.state.data ?? []) as Statement[];
       return data.some((s) => s.status === "pending" || s.status === "processing")
@@ -155,7 +155,7 @@ export default function UploadPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{s.file_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(s.created_at).toLocaleDateString()}
+                        {new Date(s.uploaded_at).toLocaleDateString()}
                         {s.row_count != null && ` · ${s.row_count} rows`}
                       </p>
                     </div>
