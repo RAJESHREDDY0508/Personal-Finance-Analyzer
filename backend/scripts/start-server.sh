@@ -6,6 +6,7 @@
 set -euo pipefail
 exec > >(tee -a /var/log/pfa-deploy.log) 2>&1
 
-echo "[start-server] Starting pfa-api at $(date -Iseconds)"
+echo "[start-server] Starting pfa-api and pfa-worker at $(date -Iseconds)"
 systemctl restart pfa-api
-echo "[start-server] pfa-api started"
+systemctl restart pfa-worker
+echo "[start-server] pfa-api and pfa-worker started"

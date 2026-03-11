@@ -79,20 +79,32 @@ jobs:
 
       - name: Invalidate CloudFront cache
         run: |
-          # Gracefully skip if CloudFront distribution hasn't been deployed yet.
+          # Try CloudFormation stack output first; fall back to SSM-stored ID.
           DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
             --stack-name PfaApp-${STAGE} \
             --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
             --output text 2>/dev/null || echo "")
+
+          # Fall back: look up by domain name stored in SSM
+          if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
+            DOMAIN=$(aws ssm get-parameter \
+              --name "/pfa/${STAGE}/domain-name" \
+              --query Parameter.Value --output text 2>/dev/null || echo "")
+            if [ -n "$DOMAIN" ]; then
+              DISTRIBUTION_ID=$(aws cloudfront list-distributions \
+                --query "DistributionList.Items[?DomainName=='${DOMAIN}'].Id" \
+                --output text 2>/dev/null || echo "")
+            fi
+          fi
 
           if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
             INVALIDATION_ID=$(aws cloudfront create-invalidation \
               --distribution-id "$DISTRIBUTION_ID" \
               --paths "/*" \
               --query 'Invalidation.Id' --output text)
-            echo "CloudFront invalidation created: $INVALIDATION_ID"
+            echo "CloudFront invalidation created: $INVALIDATION_ID for distribution $DISTRIBUTION_ID"
           else
-            echo "No CloudFront distribution found — skipping invalidation"
+            echo "WARNING: No CloudFront distribution found — skipping invalidation"
           fi
 
       - name: Deployment summary

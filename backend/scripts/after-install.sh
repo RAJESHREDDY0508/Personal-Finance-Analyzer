@@ -108,10 +108,12 @@ chown root:pfa /etc/pfa/env
 # appspec.yml sets all /opt/pfa files to mode 644; restore exec bit for scripts
 chmod +x /opt/pfa/scripts/*.sh
 
-# ── Install systemd service ───────────────────────────────────
-echo "[after-install] Installing pfa-api systemd service"
-cp /opt/pfa/pfa-api.service /etc/systemd/system/pfa-api.service
+# ── Install systemd services ──────────────────────────────────
+echo "[after-install] Installing pfa-api and pfa-worker systemd services"
+cp /opt/pfa/pfa-api.service    /etc/systemd/system/pfa-api.service
+cp /opt/pfa/pfa-worker.service /etc/systemd/system/pfa-worker.service
 systemctl daemon-reload
 systemctl enable pfa-api
+systemctl enable pfa-worker
 
 echo "[after-install] Complete"

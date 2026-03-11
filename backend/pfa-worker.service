@@ -1,0 +1,42 @@
+[Unit]
+Description=PFA SQS Worker Processes
+Documentation=https://github.com/your-org/ai-personal-finance-analyzer
+After=network-online.target pfa-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pfa
+Group=pfa
+WorkingDirectory=/opt/pfa
+
+# Environment loaded from file written by CodeDeploy after-install hook
+EnvironmentFile=/etc/pfa/env
+
+# Run all SQS consumer workers in a single async process
+ExecStart=/usr/local/bin/python3.12 /opt/pfa/run_workers.py
+
+# Graceful shutdown
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Restart policy — always restart so workers stay alive
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Logging — forward to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pfa-worker
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/pfa /tmp
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
