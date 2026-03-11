@@ -9,7 +9,11 @@ exec > >(tee -a /var/log/pfa-deploy.log) 2>&1
 echo "[after-install] Starting at $(date -Iseconds)"
 
 STAGE="${STAGE:-dev}"
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+# Use IMDSv2 token — required when instance metadata requires token auth
+IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+REGION=$(curl -s -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" \
+  "http://169.254.169.254/latest/meta-data/placement/region")
 
 # ── Install Python dependencies ───────────────────────────────
 echo "[after-install] Installing Python dependencies"
