@@ -14,7 +14,7 @@ WorkingDirectory=/opt/pfa
 EnvironmentFile=/etc/pfa/env
 
 # Run all SQS consumer workers in a single async process
-ExecStart=/usr/local/bin/python3.12 /opt/pfa/run_workers.py
+ExecStart=/usr/bin/python3.12 /opt/pfa/run_workers.py
 
 # Graceful shutdown
 KillMode=mixed

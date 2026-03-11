@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import {
   Upload,
   FileText,
@@ -10,6 +11,7 @@ import {
   XCircle,
   Loader2,
   RefreshCw,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,7 @@ const BADGE: Record<string, "secondary" | "outline" | "default" | "destructive">
 
 export default function UploadPage() {
   const qc = useQueryClient();
+  const router = useRouter();
   const [uploading, setUploading] = useState(false);
 
   const statements = useQuery<Statement[]>({
@@ -68,15 +71,16 @@ export default function UploadPage() {
         );
         form.append("file", file);
         await axios.post(data.upload_url, form);
-        toast.success("File uploaded — processing started");
+        toast.success("File uploaded — redirecting to analysis…");
         qc.invalidateQueries({ queryKey: ["statements"] });
+        // Redirect to the per-statement analysis page
+        router.push(`/statements/${data.statement_id}`);
       } catch {
         toast.error("Upload failed — please try again");
-      } finally {
         setUploading(false);
       }
     },
-    [qc]
+    [qc, router]
   );
 
   const onDrop = useCallback(
@@ -148,7 +152,15 @@ export default function UploadPage() {
               {statements.data.map((s) => (
                 <li
                   key={s.id}
-                  className="flex items-center justify-between gap-4 px-4 py-3"
+                  className={cn(
+                    "flex items-center justify-between gap-4 px-4 py-3 transition-colors",
+                    s.status === "completed"
+                      ? "hover:bg-muted/40 cursor-pointer"
+                      : "cursor-default"
+                  )}
+                  onClick={() => {
+                    if (s.status === "completed") router.push(`/statements/${s.id}`);
+                  }}
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -156,7 +168,7 @@ export default function UploadPage() {
                       <p className="truncate text-sm font-medium">{s.file_name}</p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(s.uploaded_at).toLocaleDateString()}
-                        {s.row_count != null && ` · ${s.row_count} rows`}
+                        {s.row_count != null && ` · ${s.row_count} transactions`}
                       </p>
                     </div>
                   </div>
@@ -186,11 +198,17 @@ export default function UploadPage() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => reprocess.mutate(s.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          reprocess.mutate(s.id);
+                        }}
                         title="Retry"
                       >
                         <RefreshCw className="h-3 w-3" />
                       </Button>
+                    )}
+                    {s.status === "completed" && (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     )}
                   </div>
                 </li>

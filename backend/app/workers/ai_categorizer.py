@@ -41,8 +41,8 @@ class AiCategorizerWorker(BaseWorker):
 
         AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+        # ── 1. Read uncategorized transactions in its own session ──
         async with AsyncSessionLocal() as db:
-            # Load uncategorized transactions for this statement
             result = await db.execute(
                 select(Transaction).where(
                     Transaction.statement_id == statement_id,
@@ -51,24 +51,27 @@ class AiCategorizerWorker(BaseWorker):
             )
             txns: list[Transaction] = list(result.scalars())
 
-            if not txns:
-                log.info("No uncategorized transactions found")
-                return
+        if not txns:
+            log.info("No uncategorized transactions found")
+            return
 
-            log.info("Categorizing", count=len(txns))
+        log.info("Categorizing", count=len(txns))
 
-            # Process in batches to stay within token limits
-            for batch_start in range(0, len(txns), BATCH_SIZE):
-                batch = txns[batch_start: batch_start + BATCH_SIZE]
-                descriptions = [t.description for t in batch]
+        # ── 2. Categorize in batches; write with a fresh session each time ──
+        total_done = 0
+        for batch_start in range(0, len(txns), BATCH_SIZE):
+            batch = txns[batch_start: batch_start + BATCH_SIZE]
+            descriptions = [t.description for t in batch]
 
-                try:
-                    results = await categorize_batch(descriptions)
-                    result_map = {r["index"]: r for r in results}
-                except Exception as exc:
-                    log.error("Categorization batch failed", error=str(exc))
-                    continue
+            try:
+                results = await categorize_batch(descriptions)
+                result_map = {r["index"]: r for r in results}
+            except Exception as exc:
+                log.error("Categorization batch failed", error=str(exc))
+                continue
 
+            # Fresh session per batch — no implicit-transaction conflict
+            async with AsyncSessionLocal() as db:
                 async with db.begin():
                     for local_idx, txn in enumerate(batch):
                         r = result_map.get(local_idx, {})
@@ -84,13 +87,15 @@ class AiCategorizerWorker(BaseWorker):
                                 categorization_source="ai" if r.get("category") else "rule",
                             )
                         )
+            total_done += len(batch)
 
-            await sqs_producer.send(
-                queue_url=Queues.transactions_categorized(),
-                payload={
-                    "statement_id": str(statement_id),
-                    "user_id": user_id_str,
-                    "transaction_count": len(txns),
-                },
-            )
-            log.info("transactions.categorized published", count=len(txns))
+        # ── 3. Publish to next stage ─────────────────────────────
+        await sqs_producer.send(
+            queue_url=Queues.transactions_categorized(),
+            payload={
+                "statement_id": str(statement_id),
+                "user_id": user_id_str,
+                "transaction_count": total_done,
+            },
+        )
+        log.info("transactions.categorized published", count=total_done)

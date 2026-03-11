@@ -54,7 +54,9 @@ class BaseWorker(ABC):
     group_id: ClassVar[str] = ""
 
     async def start(self) -> None:
-        queue_url = self.queue_url_fn()
+        # Access via the class to avoid Python binding self as the first arg
+        # when queue_url_fn is stored as a plain function class variable.
+        queue_url = type(self).queue_url_fn()
         class_name = type(self).__name__
 
         if not queue_url:
