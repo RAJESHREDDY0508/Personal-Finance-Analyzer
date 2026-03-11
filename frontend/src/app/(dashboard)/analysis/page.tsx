@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useMemo, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   ReceiptText,
+  RefreshCw,
 } from "lucide-react";
 import {
   PieChart,
@@ -49,7 +50,6 @@ interface Statement {
   row_count: number | null;
   error_message: string | null;
   uploaded_at: string;
-  processed_at: string | null;
 }
 
 interface Transaction {
@@ -86,13 +86,13 @@ const STATUS_BADGE: Record<string, "secondary" | "outline" | "default" | "destru
   failed: "destructive",
 };
 
-// ── Page ───────────────────────────────────────────────────────
-export default function StatementAnalysisPage() {
-  const params = useParams();
+// ── Inner component (uses useSearchParams) ─────────────────────
+function AnalysisContent() {
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const id = params?.id as string;
+  const id = searchParams.get("id");
 
-  // Poll statement until it reaches a terminal state
+  // Poll statement status until terminal
   const { data: statement, isLoading: stmtLoading } = useQuery<Statement>({
     queryKey: ["statement", id],
     queryFn: () => api.get(`/statements/${id}`).then((r) => r.data),
@@ -104,7 +104,7 @@ export default function StatementAnalysisPage() {
     enabled: !!id,
   });
 
-  // Fetch transactions once the statement is completed
+  // Fetch transactions once completed
   const { data: txnData } = useQuery<TransactionPage>({
     queryKey: ["statement-transactions", id],
     queryFn: () =>
@@ -125,12 +125,14 @@ export default function StatementAnalysisPage() {
     const expenses = transactions
       .filter((t) => !t.is_income)
       .reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0);
-    const balance = income - expenses;
-    const anomalies = transactions.filter((t) => t.is_anomaly).length;
-    return { income, expenses, balance, anomalies };
+    return {
+      income,
+      expenses,
+      balance: income - expenses,
+      anomalies: transactions.filter((t) => t.is_anomaly).length,
+    };
   }, [transactions]);
 
-  // Spending by category (expenses only)
   const categoryData = useMemo(() => {
     const map: Record<string, number> = {};
     transactions
@@ -144,19 +146,28 @@ export default function StatementAnalysisPage() {
       .map(([name, value]) => ({ name, value }));
   }, [transactions]);
 
-  // ── Render helpers ─────────────────────────────────────────
+  if (!id) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-4">
+        <FileText className="h-12 w-12 text-muted-foreground" />
+        <p className="text-muted-foreground">No statement selected.</p>
+        <Button onClick={() => router.push("/upload")}>Go to Upload</Button>
+      </div>
+    );
+  }
+
   const isProcessing =
     stmtLoading || statement?.status === "pending" || statement?.status === "processing";
 
   return (
     <div className="space-y-6 max-w-5xl">
-      {/* Back button */}
+      {/* Back */}
       <Button variant="ghost" size="sm" onClick={() => router.push("/upload")}>
         <ArrowLeft className="h-4 w-4 mr-2" />
         Back to Uploads
       </Button>
 
-      {/* Statement header */}
+      {/* Header */}
       {statement && (
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
@@ -173,32 +184,30 @@ export default function StatementAnalysisPage() {
             {statement.status === "processing" && (
               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
             )}
-            {statement.status === "completed" && (
-              <CheckCircle2 className="h-3 w-3 mr-1" />
-            )}
+            {statement.status === "completed" && <CheckCircle2 className="h-3 w-3 mr-1" />}
             {statement.status === "failed" && <XCircle className="h-3 w-3 mr-1" />}
             {statement.status.charAt(0).toUpperCase() + statement.status.slice(1)}
           </Badge>
         </div>
       )}
 
-      {/* ── Processing state ─────────────────────────────── */}
+      {/* Processing */}
       {isProcessing && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 gap-4">
-            <div className="relative">
-              <div className="h-16 w-16 rounded-full border-4 border-primary/20" />
-              <Loader2 className="h-16 w-16 animate-spin text-primary absolute inset-0" />
+            <div className="relative h-16 w-16">
+              <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
+              <Loader2 className="absolute inset-0 h-16 w-16 animate-spin text-primary" />
             </div>
             <div className="text-center">
               <p className="font-semibold text-lg">
                 {!statement || statement.status === "pending"
                   ? "Queued for processing…"
-                  : "Analyzing your statement…"}
+                  : "Analyzing your statement with AI…"}
               </p>
               <p className="text-sm text-muted-foreground mt-1">
                 {statement?.status === "processing"
-                  ? "AI is categorizing your transactions. This usually takes 15–30 seconds."
+                  ? "Categorizing transactions — usually takes 15–30 seconds."
                   : "Your file is in the queue. Starting shortly…"}
               </p>
             </div>
@@ -206,7 +215,7 @@ export default function StatementAnalysisPage() {
         </Card>
       )}
 
-      {/* ── Failed state ─────────────────────────────────── */}
+      {/* Failed */}
       {statement?.status === "failed" && (
         <Card className="border-destructive">
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
@@ -220,59 +229,54 @@ export default function StatementAnalysisPage() {
             <Button
               variant="outline"
               onClick={() =>
-                api.post(`/statements/${id}/reprocess`).then(() => router.refresh())
+                api.post(`/statements/${id}/reprocess`).then(() =>
+                  window.location.reload()
+                )
               }
             >
-              Retry
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry Processing
             </Button>
           </CardContent>
         </Card>
       )}
 
-      {/* ── Analysis results ──────────────────────────────── */}
+      {/* Results */}
       {statement?.status === "completed" && transactions.length > 0 && (
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                  <TrendingUp className="h-4 w-4 text-green-500" />
-                  Total Income
-                </div>
+                <p className="text-sm text-muted-foreground flex items-center gap-1 mb-1">
+                  <TrendingUp className="h-3.5 w-3.5 text-green-500" /> Income
+                </p>
                 <p className="text-2xl font-bold text-green-600">{fmt(stats.income)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                  <TrendingDown className="h-4 w-4 text-red-500" />
-                  Total Expenses
-                </div>
+                <p className="text-sm text-muted-foreground flex items-center gap-1 mb-1">
+                  <TrendingDown className="h-3.5 w-3.5 text-red-500" /> Expenses
+                </p>
                 <p className="text-2xl font-bold text-red-600">{fmt(stats.expenses)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                  <DollarSign className="h-4 w-4 text-primary" />
-                  Net Balance
-                </div>
-                <p
-                  className={`text-2xl font-bold ${
-                    stats.balance >= 0 ? "text-green-600" : "text-red-600"
-                  }`}
-                >
+                <p className="text-sm text-muted-foreground flex items-center gap-1 mb-1">
+                  <DollarSign className="h-3.5 w-3.5 text-primary" /> Net Balance
+                </p>
+                <p className={`text-2xl font-bold ${stats.balance >= 0 ? "text-green-600" : "text-red-600"}`}>
                   {fmt(stats.balance)}
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                  <AlertCircle className="h-4 w-4 text-amber-500" />
-                  Anomalies
-                </div>
+                <p className="text-sm text-muted-foreground flex items-center gap-1 mb-1">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-500" /> Anomalies
+                </p>
                 <p className="text-2xl font-bold">{stats.anomalies}</p>
               </CardContent>
             </Card>
@@ -281,7 +285,6 @@ export default function StatementAnalysisPage() {
           {/* Charts */}
           {categoryData.length > 0 && (
             <div className="grid md:grid-cols-2 gap-6">
-              {/* Pie chart */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Spending by Category</CardTitle>
@@ -311,10 +314,9 @@ export default function StatementAnalysisPage() {
                 </CardContent>
               </Card>
 
-              {/* Bar chart */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Top Categories</CardTitle>
+                  <CardTitle className="text-base">Top Spending Categories</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={260}>
@@ -344,7 +346,7 @@ export default function StatementAnalysisPage() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <ReceiptText className="h-4 w-4" />
-                Transactions ({transactions.length})
+                All Transactions ({transactions.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -356,12 +358,12 @@ export default function StatementAnalysisPage() {
                       <TableHead>Description</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
-                      <TableHead></TableHead>
+                      <TableHead className="w-8"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {transactions.map((t) => (
-                      <TableRow key={t.id}>
+                      <TableRow key={t.id} className={t.is_anomaly ? "bg-amber-50/50 dark:bg-amber-950/20" : ""}>
                         <TableCell className="whitespace-nowrap text-sm">
                           {new Date(t.date).toLocaleDateString()}
                         </TableCell>
@@ -379,26 +381,18 @@ export default function StatementAnalysisPage() {
                         </TableCell>
                         <TableCell
                           className={`text-right font-mono text-sm font-medium ${
-                            t.is_income ? "text-green-600" : "text-foreground"
+                            t.is_income ? "text-green-600" : ""
                           }`}
                         >
                           {t.is_income ? "+" : ""}
                           {fmt(Math.abs(parseFloat(t.amount)))}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell>
                           {t.is_anomaly && (
                             <AlertCircle
-                              className="h-4 w-4 text-amber-500 inline-block"
+                              className="h-4 w-4 text-amber-500"
                               title={t.anomaly_reason ?? "Anomaly detected"}
                             />
-                          )}
-                          {t.is_duplicate && (
-                            <span
-                              className="text-xs text-muted-foreground ml-1"
-                              title="Possible duplicate"
-                            >
-                              dup
-                            </span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -411,7 +405,6 @@ export default function StatementAnalysisPage() {
         </>
       )}
 
-      {/* Completed but no transactions parsed */}
       {statement?.status === "completed" && transactions.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center py-12 gap-3">
@@ -421,5 +414,20 @@ export default function StatementAnalysisPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+// ── Page wrapper with Suspense (required for useSearchParams) ──
+export default function AnalysisPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      }
+    >
+      <AnalysisContent />
+    </Suspense>
   );
 }

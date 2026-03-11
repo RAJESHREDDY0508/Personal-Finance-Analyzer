@@ -74,7 +74,7 @@ export default function UploadPage() {
         toast.success("File uploaded — redirecting to analysis…");
         qc.invalidateQueries({ queryKey: ["statements"] });
         // Redirect to the per-statement analysis page
-        router.push(`/statements/${data.statement_id}`);
+        router.push(`/analysis?id=${data.statement_id}`);
       } catch {
         toast.error("Upload failed — please try again");
         setUploading(false);
@@ -159,7 +159,7 @@ export default function UploadPage() {
                       : "cursor-default"
                   )}
                   onClick={() => {
-                    if (s.status === "completed") router.push(`/statements/${s.id}`);
+                    if (s.status === "completed") router.push(`/analysis?id=${s.id}`);
                   }}
                 >
                   <div className="flex items-center gap-3 min-w-0">
