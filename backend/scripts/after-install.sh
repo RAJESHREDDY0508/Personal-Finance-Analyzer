@@ -29,10 +29,13 @@ DB_SECRET_JSON=$(aws secretsmanager get-secret-value \
   --region "${REGION}" \
   --query SecretString --output text)
 
-DB_HOST=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('host','localhost'))")
-DB_PORT=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('port',5432))")
-DB_USER=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('username','pfa_user'))")
-DB_PASS=$(echo "${DB_SECRET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('password',''))")
+# Use python3.12 (installed by user data); python3 may point to an older system version
+DB_HOST=$(echo "${DB_SECRET_JSON}" | python3.12 -c "import sys,json; d=json.load(sys.stdin); print(d.get('host','localhost'))")
+DB_PORT=$(echo "${DB_SECRET_JSON}" | python3.12 -c "import sys,json; d=json.load(sys.stdin); print(d.get('port',5432))")
+DB_USER=$(echo "${DB_SECRET_JSON}" | python3.12 -c "import sys,json; d=json.load(sys.stdin); print(d.get('username','pfa_user'))")
+DB_PASS=$(echo "${DB_SECRET_JSON}" | python3.12 -c "import sys,json; d=json.load(sys.stdin); print(d.get('password',''))")
+
+echo "[after-install] DB_HOST=${DB_HOST} DB_PORT=${DB_PORT} DB_USER=${DB_USER}"
 
 # SSM parameters helper
 fetch_ssm() {
@@ -83,7 +86,7 @@ STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
 STRIPE_PREMIUM_PRICE_ID=${STRIPE_PRICE_ID}
 
 SES_SENDER_EMAIL=${SES_SENDER_EMAIL}
-SES_SENDER_NAME=AI Finance Analyzer
+SES_SENDER_NAME="AI Finance Analyzer"
 
 OPENAI_API_KEY=${OPENAI_API_KEY}
 
