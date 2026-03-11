@@ -108,4 +108,9 @@ jobs:
         env:
           CDK_DEFAULT_ACCOUNT: "123456789012"
           CDK_DEFAULT_REGION: "us-east-1"
-        run: npx cdk synth --context stage=dev --context skipCloudFront=true --quiet
+          # Fake credentials allow CDK credential provider to resolve without
+          # hitting STS; context lookups (e.g. AMI IDs) are skipped via --no-lookups
+          AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE"
+          AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+          AWS_DEFAULT_REGION: "us-east-1"
+        run: npx cdk synth --context stage=dev --context skipCloudFront=true --no-lookups --quiet
