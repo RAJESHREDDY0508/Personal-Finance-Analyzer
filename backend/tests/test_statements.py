@@ -51,13 +51,22 @@ async def test_upload_success_csv(client: AsyncClient) -> None:
             json={"file_name": "january.csv", "file_type": "csv"},
             headers=headers,
         )
-    assert resp.status_code == 201
-    data = resp.json()
-    assert "statement_id" in data
-    assert data["upload_url"] == PRESIGNED_STUB["url"]
-    assert data["s3_key"].endswith(".csv")
-    mock_s3.assert_called_once()
-    mock_sqs.assert_called_once()
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "statement_id" in data
+        assert data["upload_url"] == PRESIGNED_STUB["url"]
+        assert data["s3_key"].endswith(".csv")
+        mock_s3.assert_called_once()
+        # SQS is NOT sent at upload time — only after /confirm is called
+        mock_sqs.assert_not_called()
+
+        # Calling /confirm triggers SQS exactly once
+        confirm_resp = await client.post(
+            f"/api/v1/statements/{data['statement_id']}/confirm",
+            headers=headers,
+        )
+        assert confirm_resp.status_code == 200
+        mock_sqs.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -77,23 +86,31 @@ async def test_upload_s3_failure_returns_503(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_sqs_failure_still_returns_201(client: AsyncClient) -> None:
+async def test_confirm_sqs_failure_returns_503(client: AsyncClient) -> None:
+    """confirm endpoint returns 503 when SQS is unreachable."""
     headers = await _auth_headers(client)
     with (
         patch("app.api.v1.statements.generate_presigned_upload_url", new_callable=AsyncMock) as mock_s3,
-        patch(
-            "app.api.v1.statements.sqs_producer.send",
-            new_callable=AsyncMock,
-            side_effect=Exception("SQS down"),
-        ),
     ):
         mock_s3.return_value = PRESIGNED_STUB
-        resp = await client.post(
+        upload_resp = await client.post(
             "/api/v1/statements/upload",
             json={"file_name": "test.csv", "file_type": "csv"},
             headers=headers,
         )
-    assert resp.status_code == 201
+    assert upload_resp.status_code == 201
+    statement_id = upload_resp.json()["statement_id"]
+
+    with patch(
+        "app.api.v1.statements.sqs_producer.send",
+        new_callable=AsyncMock,
+        side_effect=Exception("SQS down"),
+    ):
+        confirm_resp = await client.post(
+            f"/api/v1/statements/{statement_id}/confirm",
+            headers=headers,
+        )
+    assert confirm_resp.status_code == 503
 
 
 @pytest.mark.asyncio
