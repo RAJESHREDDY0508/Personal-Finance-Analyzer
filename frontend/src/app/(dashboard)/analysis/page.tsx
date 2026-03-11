@@ -27,6 +27,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  type PieLabelRenderProps,
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -299,8 +300,8 @@ function AnalysisContent() {
                         cx="50%"
                         cy="50%"
                         outerRadius={90}
-                        label={({ name, percent }) =>
-                          `${name} ${(percent * 100).toFixed(0)}%`
+                        label={(props: PieLabelRenderProps) =>
+                          `${props.name ?? ""} ${(((props.percent ?? 0) as number) * 100).toFixed(0)}%`
                         }
                         labelLine={false}
                       >
@@ -308,7 +309,7 @@ function AnalysisContent() {
                           <Cell key={i} fill={COLORS[i % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => fmt(v)} />
+                      <Tooltip formatter={(v: unknown) => fmt(Number(v))} />
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -328,7 +329,7 @@ function AnalysisContent() {
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                       <XAxis type="number" tickFormatter={(v) => `$${v}`} fontSize={11} />
                       <YAxis type="category" dataKey="name" width={110} fontSize={11} />
-                      <Tooltip formatter={(v: number) => fmt(v)} />
+                      <Tooltip formatter={(v: unknown) => fmt(Number(v))} />
                       <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                         {categoryData.slice(0, 8).map((_, i) => (
                           <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -389,10 +390,9 @@ function AnalysisContent() {
                         </TableCell>
                         <TableCell>
                           {t.is_anomaly && (
-                            <AlertCircle
-                              className="h-4 w-4 text-amber-500"
-                              title={t.anomaly_reason ?? "Anomaly detected"}
-                            />
+                            <span title={t.anomaly_reason ?? "Anomaly detected"}>
+                              <AlertCircle className="h-4 w-4 text-amber-500" />
+                            </span>
                           )}
                         </TableCell>
                       </TableRow>
