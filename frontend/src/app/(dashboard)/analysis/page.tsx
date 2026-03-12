@@ -57,11 +57,12 @@ interface Transaction {
   id: string;
   date: string;
   description: string;
-  amount: string;
+  amount: string;        // backend serializes Decimal as string
   category: string | null;
   subcategory: string | null;
   is_income: boolean;
   is_anomaly: boolean;
+  anomaly_score: string | null;
   anomaly_reason: string | null;
   is_duplicate: boolean;
 }
@@ -105,8 +106,9 @@ function AnalysisContent() {
     enabled: !!id,
   });
 
-  // Fetch transactions once completed
-  const { data: txnData } = useQuery<TransactionPage>({
+  // Fetch transactions once completed — refetchOnMount ensures data loads
+  // even if the query was previously cached with an empty result
+  const { data: txnData, isLoading: txnLoading } = useQuery<TransactionPage>({
     queryKey: ["statement-transactions", id],
     queryFn: () =>
       api
@@ -125,6 +127,8 @@ function AnalysisContent() {
         }),
     enabled: statement?.status === "completed",
     staleTime: 30_000,
+    refetchOnMount: true,   // reload even when cached so back-nav always shows data
+    retry: 3,
   });
 
   // Guard: always an array regardless of API response shape
@@ -419,7 +423,17 @@ function AnalysisContent() {
         </>
       )}
 
-      {statement?.status === "completed" && transactions.length === 0 && (
+      {/* Loading transactions after status flips to completed */}
+      {statement?.status === "completed" && txnLoading && transactions.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center py-12 gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-muted-foreground">Loading transactions…</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {statement?.status === "completed" && !txnLoading && transactions.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center py-12 gap-3">
             <FileText className="h-10 w-10 text-muted-foreground" />

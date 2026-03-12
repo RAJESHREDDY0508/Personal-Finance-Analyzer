@@ -80,11 +80,28 @@ def _parse_date(raw: str) -> date:
 
 # ── Column detection ──────────────────────────────────────────
 
-_DATE_COLS = {"date", "transaction date", "posted date", "post date", "trans date"}
-_DESC_COLS = {"description", "memo", "name", "payee", "transaction description", "details"}
-_AMOUNT_COLS = {"amount", "transaction amount", "sum", "value"}
-_DEBIT_COLS = {"debit", "withdrawal", "charge", "charges"}
-_CREDIT_COLS = {"credit", "deposit", "payment"}
+_DATE_COLS = {
+    "date", "transaction date", "posted date", "post date", "trans date",
+    "posting date", "settlement date", "value date", "effective date",
+    "trans. date", "transaction dt", "activity date",
+}
+_DESC_COLS = {
+    "description", "memo", "name", "payee", "transaction description", "details",
+    "narration", "particulars", "transaction details", "narrative",
+    "reference", "note", "remarks", "transaction narration",
+}
+_AMOUNT_COLS = {
+    "amount", "transaction amount", "sum", "value",
+    "net amount", "net", "total", "transaction value",
+}
+_DEBIT_COLS = {
+    "debit", "withdrawal", "charge", "charges",
+    "debit amount", "withdrawals", "dr", "outflow", "money out",
+}
+_CREDIT_COLS = {
+    "credit", "deposit", "payment",
+    "credit amount", "deposits", "cr", "inflow", "money in",
+}
 
 
 def _match(header: str, candidates: set[str]) -> bool:

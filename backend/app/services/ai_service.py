@@ -6,10 +6,11 @@ Categories (aligned with common budgeting apps):
   Health & Medical, Housing, Utilities, Travel, Education,
   Personal Care, Gifts & Donations, Business Services, Income, Transfers, Other
 """
+import asyncio
 import json
 import re
 import structlog
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError, APIError, APIConnectionError, APITimeoutError
 
 from app.config import settings
 
@@ -95,6 +96,64 @@ Rules:
 """
 
 
+async def _call_openai_with_retry(
+    client: AsyncOpenAI,
+    descriptions: list[str],
+    max_retries: int = 3,
+) -> list[dict]:
+    """
+    Call OpenAI with exponential backoff on rate-limit / transient errors.
+    Raises on final failure so caller can fall back to rule-based.
+    """
+    user_content = json.dumps(
+        [{"index": i, "description": d} for i, d in enumerate(descriptions)]
+    )
+    for attempt in range(max_retries):
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=2000,
+                timeout=30.0,
+            )
+            raw = response.choices[0].message.content or "[]"
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+            return parsed  # type: ignore[return-value]
+
+        except RateLimitError as exc:
+            wait = 2 ** attempt * 5  # 5s, 10s, 20s
+            logger.warning("OpenAI rate limit — retrying", attempt=attempt + 1, wait=wait, error=str(exc))
+            if attempt < max_retries - 1:
+                await asyncio.sleep(wait)
+            else:
+                raise
+
+        except (APITimeoutError, APIConnectionError) as exc:
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            logger.warning("OpenAI transient error — retrying", attempt=attempt + 1, wait=wait, error=str(exc))
+            if attempt < max_retries - 1:
+                await asyncio.sleep(wait)
+            else:
+                raise
+
+        except (APIError, json.JSONDecodeError) as exc:
+            # Non-retryable API error or bad JSON — fall through immediately
+            logger.warning("OpenAI non-retryable error", error=str(exc))
+            raise
+
+    raise RuntimeError("OpenAI retry exhausted")
+
+
 async def categorize_batch(descriptions: list[str]) -> list[dict]:
     """
     Categorize a batch of transaction descriptions using GPT-4o-mini.
@@ -106,32 +165,10 @@ async def categorize_batch(descriptions: list[str]) -> list[dict]:
 
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
-        user_content = json.dumps(
-            [{"index": i, "description": d} for i, d in enumerate(descriptions)]
-        )
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0,
-            max_tokens=2000,
-        )
-        raw = response.choices[0].message.content or "[]"
-        # Response is a JSON object with a key like "transactions" or just an array
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            # Find the first list value
-            for v in parsed.values():
-                if isinstance(v, list):
-                    parsed = v
-                    break
-        return parsed  # type: ignore[return-value]
+        return await _call_openai_with_retry(client, descriptions)
 
     except Exception as exc:
-        logger.warning("OpenAI categorization failed, using rule-based fallback", error=str(exc))
+        logger.warning("OpenAI categorization failed after retries — using rule-based fallback", error=str(exc))
         return _rule_based_batch(descriptions)
 
 

@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
@@ -33,6 +33,7 @@ async def detect_zscore_anomalies(
         .where(and_(
             Transaction.user_id == user_id,
             Transaction.is_income == False,
+            Transaction.is_duplicate == False,  # exclude duplicates from baseline
             Transaction.date >= lookback,
             Transaction.statement_id != statement_id,
         ))
@@ -51,6 +52,7 @@ async def detect_zscore_anomalies(
         select(Transaction).where(and_(
             Transaction.statement_id == statement_id,
             Transaction.is_income == False,
+            Transaction.is_duplicate == False,
         ))
     )
     txns = list(curr_result.scalars())
@@ -66,9 +68,10 @@ async def detect_zscore_anomalies(
         z = (amount - mean) / stdev
         if z > threshold:
             txn.is_anomaly = True
-            score = Decimal(str(round(min(z / 10.0, 1.0), 4)))
+            # Normalise z-score to 0-1 scale (capped at z=20 for max score)
+            score = Decimal(str(round(min(z / 20.0, 1.0), 4)))
             txn.anomaly_score = max(txn.anomaly_score or Decimal("0"), score)
-            reason = f"Z-score={z:.2f}: unusually high {cat} (mean=${mean:.2f})"
+            reason = f"Unusually high {cat} spend (${amount:.2f} vs avg ${mean:.2f})"
             txn.anomaly_reason = (txn.anomaly_reason + " | " + reason) if txn.anomaly_reason else reason
             flagged += 1
     await db.flush()
@@ -80,26 +83,58 @@ async def detect_duplicates(
     user_id: uuid.UUID,
     statement_id: uuid.UUID,
 ) -> int:
+    """
+    Batch duplicate detection — one query instead of N+1.
+    Flags a transaction as duplicate if another transaction for the same user
+    has an identical (date, amount, description[:50]) but a different id.
+    """
+    # Load all transactions for this statement
     curr_result = await db.execute(
         select(Transaction).where(Transaction.statement_id == statement_id)
     )
     txns = list(curr_result.scalars())
+    if not txns:
+        return 0
+
+    # Build lookup keys (date, amount, desc_prefix)
+    keys = [(t.date, t.amount, t.description[:50]) for t in txns]
+
+    # Single query: find any existing transaction for this user that matches
+    # any of those (date, amount, description-prefix) tuples
+    # We use an OR of AND conditions (SQLAlchemy compiles efficiently)
+    from sqlalchemy import or_
+    conditions = [
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.date == k[0],
+            Transaction.amount == k[1],
+            Transaction.id.notin_([t.id for t in txns]),  # exclude self
+        )
+        for k in keys
+    ]
+    if not conditions:
+        return 0
+
+    existing_result = await db.execute(
+        select(Transaction).where(or_(*conditions))
+    )
+    existing_txns = list(existing_result.scalars())
+
+    # Build fast lookup: (date, amount, desc_prefix) → transaction
+    existing_map: dict[tuple, Transaction] = {}
+    for ex in existing_txns:
+        key = (ex.date, ex.amount, ex.description[:50])
+        existing_map[key] = ex
+
     flagged = 0
     for txn in txns:
-        desc_prefix = txn.description[:50]
-        existing_result = await db.execute(
-            select(Transaction).where(and_(
-                Transaction.user_id == user_id,
-                Transaction.date == txn.date,
-                Transaction.amount == txn.amount,
-                Transaction.id != txn.id,
-            )).limit(1)
-        )
-        existing = existing_result.scalar_one_or_none()
-        if existing and existing.description[:50] == desc_prefix:
+        key = (txn.date, txn.amount, txn.description[:50])
+        match = existing_map.get(key)
+        if match:
             txn.is_duplicate = True
-            txn.duplicate_of = existing.id
+            txn.duplicate_of = match.id
             flagged += 1
+
     await db.flush()
     return flagged
 
@@ -113,11 +148,14 @@ async def detect_category_spikes(
 ) -> int:
     today = date.today()
     month_start = date(today.year, today.month, 1)
+
+    # Current month spending per category — exclude duplicates
     curr_result = await db.execute(
         select(Transaction.category, func.sum(Transaction.amount).label("total"))
         .where(and_(
             Transaction.statement_id == statement_id,
             Transaction.is_income == False,
+            Transaction.is_duplicate == False,  # ← fixed: exclude duplicates
             Transaction.date >= month_start,
         ))
         .group_by(Transaction.category)
@@ -125,14 +163,19 @@ async def detect_category_spikes(
     current_by_cat: dict[str, float] = {
         (r.category or "Other"): float(abs(r.total)) for r in curr_result
     }
+
+    # Calculate lookback window start (go back exactly lookback_months months)
     lookback_start = month_start
     for _ in range(lookback_months):
         lookback_start = (lookback_start - timedelta(days=1)).replace(day=1)
+
+    # Historical average per category — exclude duplicates
     hist_result = await db.execute(
         select(Transaction.category, func.sum(Transaction.amount).label("total"))
         .where(and_(
             Transaction.user_id == user_id,
             Transaction.is_income == False,
+            Transaction.is_duplicate == False,  # ← fixed: exclude duplicates
             Transaction.date >= lookback_start,
             Transaction.date < month_start,
         ))
@@ -142,16 +185,20 @@ async def detect_category_spikes(
         (r.category or "Other"): float(abs(r.total)) / lookback_months
         for r in hist_result
     }
+
     spiked_cats: set[str] = set()
     for cat, current_total in current_by_cat.items():
         avg = historical_avg.get(cat)
         if avg and avg > 0 and current_total > avg * spike_factor:
             spiked_cats.add(cat)
+
     if not spiked_cats:
         return 0
+
     txns_result = await db.execute(
         select(Transaction).where(and_(
             Transaction.statement_id == statement_id,
+            Transaction.is_duplicate == False,
             Transaction.category.in_(spiked_cats),
         ))
     )
@@ -160,7 +207,7 @@ async def detect_category_spikes(
         cat = txn.category or "Other"
         avg = historical_avg.get(cat, 0)
         ratio = current_by_cat[cat] / avg if avg > 0 else 0
-        reason = f"Category spike: {cat} is {ratio:.1f}x the 3-month average"
+        reason = f"Category spike: {cat} is {ratio:.1f}x the {lookback_months}-month average"
         txn.is_anomaly = True
         txn.anomaly_score = txn.anomaly_score or Decimal("0.5")
         txn.anomaly_reason = (txn.anomaly_reason + " | " + reason) if txn.anomaly_reason else reason

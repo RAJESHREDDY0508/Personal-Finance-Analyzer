@@ -80,6 +80,7 @@ export default function UploadPage() {
         await api.post(`/statements/${data.statement_id}/confirm`);
         toast.success("File uploaded — opening analysis…");
         qc.invalidateQueries({ queryKey: ["statements"] });
+        setUploading(false); // reset before navigation so back-button works
         router.push(`/analysis?id=${data.statement_id}`);
       } catch {
         toast.error("Upload failed — please try again");

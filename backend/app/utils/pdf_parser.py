@@ -88,15 +88,19 @@ def _parse_table(table: list[list[str | None]]) -> list[ParsedTransaction]:
 
 # ── Text-based fallback ───────────────────────────────────────
 
-# Pattern: date  description  amount (with optional balance)
+# Pattern: date  description  amount (with optional balance column ignored)
+# Amount group handles: $1,234.56  -1234.56  (1,234.56)  1234.56
 _LINE_RE = re.compile(
     r"(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}|\d{4}[/\-]\d{2}[/\-]\d{2})"   # date
-    r"\s+"
-    r"(.+?)"                                                               # description
-    r"\s+"
-    r"([(\-]?\$?[\d,]+\.?\d*\)?)$",                                       # amount
+    r"[ \t]+"
+    r"(.+?)"                                                               # description (non-greedy)
+    r"[ \t]+"
+    r"(\(\$?[\d,]+\.?\d*\)|[-]?\$?[\d,]+\.\d{2})(?:[ \t].*)?$",         # amount (parenthetical or decimal)
     re.MULTILINE,
 )
+
+# Max pages to process — guards against OOM on huge PDFs
+_MAX_PAGES = 50
 
 
 def _text_fallback(text: str) -> list[ParsedTransaction]:
@@ -130,7 +134,16 @@ def parse_pdf(file_bytes: bytes) -> list[ParsedTransaction]:
             transactions: list[ParsedTransaction] = []
             full_text = ""
 
-            for page in pdf.pages:
+            pages = pdf.pages[:_MAX_PAGES]  # Guard against OOM on huge PDFs
+            if len(pdf.pages) > _MAX_PAGES:
+                import structlog
+                structlog.get_logger(__name__).warning(
+                    "PDF truncated for parsing",
+                    total_pages=len(pdf.pages),
+                    processed_pages=_MAX_PAGES,
+                )
+
+            for page in pages:
                 full_text += page.extract_text() or ""
                 for table in page.extract_tables():
                     transactions.extend(_parse_table(table))
