@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/card";
 import { useLogin } from "@/hooks/useAuth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const schema = z.object({
   email: z.string().email("Valid email required"),
@@ -97,7 +97,7 @@ export default function LoginPage() {
             variant="outline"
             className="w-full gap-2"
             onClick={() => {
-              window.location.href = `${API_URL}/auth/google/authorize`;
+              window.location.href = `${BACKEND_URL}/api/v1/auth/google/authorize`;
             }}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
