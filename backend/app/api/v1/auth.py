@@ -43,7 +43,11 @@ async def register_user(
     # Auto-login after registration
     _, access_token, refresh_token = await login(db, email=body.email, password=body.password)
 
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=UserResponse.model_validate(user),
+    )
 
 
 @router.post(
@@ -57,13 +61,17 @@ async def login_user(
 ) -> TokenResponse:
     """Return access + refresh tokens for valid credentials."""
     try:
-        _, access_token, refresh_token = await login(
+        user_obj, access_token, refresh_token = await login(
             db, email=body.email, password=body.password
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
 
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=UserResponse.model_validate(user_obj),
+    )
 
 
 @router.post(

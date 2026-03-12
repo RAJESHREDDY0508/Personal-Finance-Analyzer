@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     ses_sender_email: str = "noreply@example.com"
     ses_sender_name: str = "AI Finance Analyzer"
 
+    # ── Google OAuth ─────────────────────────────────────────
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+
     # ── Frontend ─────────────────────────────────────────────
     frontend_url: str = "http://localhost:3000"
 

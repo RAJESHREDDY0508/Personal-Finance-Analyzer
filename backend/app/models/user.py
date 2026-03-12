@@ -23,6 +23,8 @@ class User(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255))
     health_score: Mapped[int] = mapped_column(default=0)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024))
+    google_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     email_reports: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(

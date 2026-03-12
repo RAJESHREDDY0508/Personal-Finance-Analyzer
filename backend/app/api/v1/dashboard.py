@@ -38,12 +38,11 @@ async def spending_by_category(
     month: int = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> list:
     today = date.today()
     y = year or today.year
     m = month or today.month
-    categories = await get_spending_by_category(db, current_user.id, y, m)
-    return {"year": y, "month": m, "categories": categories}
+    return await get_spending_by_category(db, current_user.id, y, m)
 
 
 @router.get("/spending-trend", summary="Monthly expense trend for the last N months")
@@ -51,9 +50,8 @@ async def spending_trend(
     months: int = Query(default=6, ge=1, le=24),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    trend = await get_spending_trend(db, current_user.id, months)
-    return {"trend": trend}
+) -> list:
+    return await get_spending_trend(db, current_user.id, months)
 
 
 @router.get("/savings-rate", summary="Monthly savings rate trend")
@@ -61,6 +59,5 @@ async def savings_rate(
     months: int = Query(default=6, ge=1, le=24),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    trend = await get_savings_rate(db, current_user.id, months)
-    return {"trend": trend}
+) -> list:
+    return await get_savings_rate(db, current_user.id, months)

@@ -4,12 +4,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-interface User {
+export interface User {
   id: string;
   email: string;
   full_name: string | null;
   plan: "free" | "premium";
   health_score: number;
+  avatar_url?: string | null;
 }
 
 interface AuthState {

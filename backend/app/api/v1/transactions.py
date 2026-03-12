@@ -32,12 +32,15 @@ async def list_transactions(
     is_anomaly: bool | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    search: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     filters = [Transaction.user_id == current_user.id]
+    actual_skip = offset or skip  # accept both names
 
     if statement_id is not None:
         filters.append(Transaction.statement_id == statement_id)
@@ -51,6 +54,8 @@ async def list_transactions(
         filters.append(Transaction.date >= date_from)
     if date_to is not None:
         filters.append(Transaction.date <= date_to)
+    if search is not None:
+        filters.append(Transaction.description.ilike(f"%{search}%"))
 
     where = and_(*filters)
 
@@ -58,21 +63,23 @@ async def list_transactions(
         select(func.count()).select_from(Transaction).where(where)
     )
     total = count_result.scalar_one()
+    pages = max(1, (total + limit - 1) // limit)
+    page = actual_skip // limit + 1
 
     result = await db.execute(
         select(Transaction)
         .where(where)
         .order_by(Transaction.date.desc(), Transaction.created_at.desc())
-        .offset(skip)
+        .offset(actual_skip)
         .limit(limit)
     )
     txns = list(result.scalars())
 
     return {
-        "transactions": [TransactionResponse.model_validate(t) for t in txns],
+        "items": [TransactionResponse.model_validate(t) for t in txns],
         "total": total,
-        "skip": skip,
-        "limit": limit,
+        "page": page,
+        "pages": pages,
     }
 
 

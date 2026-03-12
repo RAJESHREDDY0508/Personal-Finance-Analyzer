@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/stores/authStore";
 import { useLogout } from "@/hooks/useAuth";
@@ -27,7 +27,10 @@ export default function Header({ onMenuToggle }: HeaderProps) {
   const logout = useLogout();
   const router = useRouter();
 
-  const initials = user?.email?.slice(0, 2).toUpperCase() ?? "??";
+  const displayName = user?.full_name || user?.email || "";
+  const initials = user?.full_name
+    ? user.full_name.split(" ").map((n) => n.charAt(0)).join("").slice(0, 2).toUpperCase()
+    : (user?.email?.slice(0, 2).toUpperCase() ?? "??");
 
   return (
     <header className="flex h-14 items-center justify-between gap-3 border-b px-4 bg-background shrink-0">
@@ -64,13 +67,19 @@ export default function Header({ onMenuToggle }: HeaderProps) {
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-full outline-none hover:ring-2 hover:ring-ring/50">
             <Avatar className="h-8 w-8 pointer-events-none">
+              {user?.avatar_url && (
+                <AvatarImage src={user.avatar_url} alt={displayName} />
+              )}
               <AvatarFallback className="text-xs">{initials}</AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>
 
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuLabel>
-              <p className="text-sm font-medium truncate">{user?.email}</p>
+              {user?.full_name && (
+                <p className="text-sm font-semibold truncate">{user.full_name}</p>
+              )}
+              <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
               <Badge variant="secondary" className="mt-1 text-xs capitalize">
                 {user?.plan ?? "free"}
               </Badge>

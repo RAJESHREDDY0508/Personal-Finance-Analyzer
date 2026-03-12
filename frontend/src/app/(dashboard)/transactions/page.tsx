@@ -52,7 +52,7 @@ interface Transaction {
   id: string;
   date: string;
   description: string;
-  amount: number;
+  amount: string;
   category: string | null;
   is_income: boolean;
   is_anomaly: boolean;
@@ -194,7 +194,7 @@ export default function TransactionsPage() {
                       }`}
                     >
                       {t.is_income ? "+" : ""}
-                      {Math.abs(t.amount).toLocaleString("en-US", {
+                      {Math.abs(parseFloat(t.amount)).toLocaleString("en-US", {
                         style: "currency",
                         currency: "USD",
                       })}

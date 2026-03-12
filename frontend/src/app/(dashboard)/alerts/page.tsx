@@ -13,9 +13,9 @@ interface AnomalyTransaction {
   id: string;
   date: string;
   description: string;
-  amount: number;
+  amount: string;
   anomaly_reason: string | null;
-  anomaly_score: number | null;
+  anomaly_score: string | null;
   category: string | null;
 }
 
@@ -34,7 +34,10 @@ export default function AlertsPage() {
   const anomalies = useQuery<AnomalyTransaction[]>({
     queryKey: ["anomalies"],
     queryFn: () =>
-      api.get("/transactions?is_anomaly=true&limit=50").then((r) => r.data.items ?? r.data),
+      api.get("/transactions?is_anomaly=true&limit=50").then((r) => {
+        const d = r.data;
+        return Array.isArray(d?.items) ? d.items : Array.isArray(d) ? d : [];
+      }),
   });
 
   const suggestions = useQuery<{ suggestions: Suggestion[]; total: number }>({
@@ -106,7 +109,7 @@ export default function AlertsPage() {
                       <p className="text-sm font-medium truncate">{t.description}</p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(t.date).toLocaleDateString()} ·{" "}
-                        {Math.abs(t.amount).toLocaleString("en-US", {
+                        {Math.abs(parseFloat(t.amount)).toLocaleString("en-US", {
                           style: "currency",
                           currency: "USD",
                         })}
@@ -119,7 +122,7 @@ export default function AlertsPage() {
                       )}
                     </div>
                     <Badge variant="destructive" className="shrink-0 text-xs">
-                      Score: {t.anomaly_score?.toFixed(2) ?? "—"}
+                      Score: {t.anomaly_score != null ? parseFloat(t.anomaly_score).toFixed(2) : "—"}
                     </Badge>
                   </div>
                 ))

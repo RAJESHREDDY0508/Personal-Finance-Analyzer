@@ -1,7 +1,11 @@
 """
 Pydantic schemas for authentication endpoints.
 """
+from __future__ import annotations
+
 from pydantic import BaseModel, EmailStr, Field
+
+from app.schemas.user import UserResponse
 
 
 class RegisterRequest(BaseModel):
@@ -19,6 +23,7 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    user: UserResponse | None = None
 
 
 class RefreshRequest(BaseModel):
