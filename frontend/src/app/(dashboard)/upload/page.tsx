@@ -43,9 +43,13 @@ export default function UploadPage() {
 
   const statements = useQuery<Statement[]>({
     queryKey: ["statements"],
-    queryFn: () => api.get("/statements").then((r) => r.data.statements ?? r.data),
+    queryFn: () =>
+      api.get("/statements").then((r) => {
+        const raw = r.data;
+        return Array.isArray(raw?.statements) ? raw.statements : Array.isArray(raw) ? raw : [];
+      }),
     refetchInterval: (query) => {
-      const data = (query.state.data ?? []) as Statement[];
+      const data = Array.isArray(query.state.data) ? (query.state.data as Statement[]) : [];
       return data.some((s) => s.status === "pending" || s.status === "processing")
         ? 3000
         : false;

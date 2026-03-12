@@ -111,12 +111,23 @@ function AnalysisContent() {
     queryFn: () =>
       api
         .get(`/transactions?statement_id=${id}&limit=200`)
-        .then((r) => ({ items: r.data.items ?? r.data, total: r.data.total ?? 0 })),
+        .then((r) => {
+          const raw = r.data;
+          const items = Array.isArray(raw?.items)
+            ? raw.items
+            : Array.isArray(raw)
+            ? raw
+            : [];
+          return { items, total: raw?.total ?? items.length };
+        }),
     enabled: statement?.status === "completed",
     staleTime: 30_000,
   });
 
-  const transactions = txnData?.items ?? [];
+  // Guard: always an array regardless of API response shape
+  const transactions: Transaction[] = Array.isArray(txnData?.items)
+    ? txnData.items
+    : [];
 
   // ── Derived stats ──────────────────────────────────────────
   const stats = useMemo(() => {
