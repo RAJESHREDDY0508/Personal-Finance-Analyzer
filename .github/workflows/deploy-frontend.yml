@@ -79,22 +79,24 @@ jobs:
 
       - name: Invalidate CloudFront cache
         run: |
-          # Try CloudFormation stack output first; fall back to SSM-stored ID.
-          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-            --stack-name PfaApp-${STAGE} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-            --output text 2>/dev/null || echo "")
+          # Try SSM-stored distribution ID first (most reliable)
+          DISTRIBUTION_ID=$(aws ssm get-parameter \
+            --name "/pfa/${STAGE}/cloudfront-distribution-id" \
+            --query Parameter.Value --output text 2>/dev/null || echo "")
 
-          # Fall back: look up by domain name stored in SSM
+          # Fall back: CloudFormation stack output
           if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
-            DOMAIN=$(aws ssm get-parameter \
-              --name "/pfa/${STAGE}/domain-name" \
-              --query Parameter.Value --output text 2>/dev/null || echo "")
-            if [ -n "$DOMAIN" ]; then
-              DISTRIBUTION_ID=$(aws cloudfront list-distributions \
-                --query "DistributionList.Items[?DomainName=='${DOMAIN}'].Id" \
-                --output text 2>/dev/null || echo "")
-            fi
+            DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+              --stack-name PfaApp-${STAGE} \
+              --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
+              --output text 2>/dev/null || echo "")
+          fi
+
+          # Last resort: list all distributions and pick the first
+          if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
+            DISTRIBUTION_ID=$(aws cloudfront list-distributions \
+              --query "DistributionList.Items[0].Id" \
+              --output text 2>/dev/null || echo "")
           fi
 
           if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
