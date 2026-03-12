@@ -54,6 +54,9 @@ STRIPE_PRICE_ID=$(fetch_ssm "stripe-price-id")
 SES_SENDER_EMAIL=$(fetch_ssm "ses-sender-email")
 OPENAI_API_KEY=$(fetch_ssm "openai-api-key")
 DOMAIN_NAME=$(fetch_ssm "domain-name")
+GOOGLE_CLIENT_ID=$(fetch_ssm "google-client-id")
+GOOGLE_CLIENT_SECRET=$(fetch_ssm "google-client-secret")
+GOOGLE_REDIRECT_URI=$(fetch_ssm "google-redirect-uri")
 
 # SQS queue URLs from SSM (stored by data-stack CDK)
 SQS_STATEMENT_UPLOADED=$(fetch_ssm "sqs/statement-uploaded-url")
@@ -99,6 +102,10 @@ SQS_REPORT_GENERATED_URL=${SQS_REPORT_GENERATED}
 SQS_SUBSCRIPTION_EVENTS_URL=${SQS_SUBSCRIPTION_EVENTS}
 
 FRONTEND_URL=${FRONTEND_URL}
+
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
 EOF
 
 chmod 640 /etc/pfa/env
