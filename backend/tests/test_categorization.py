@@ -87,7 +87,7 @@ async def test_list_transactions_empty(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/transactions", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["transactions"] == []
+    assert data["items"] == []
     assert data["total"] == 0
 
 

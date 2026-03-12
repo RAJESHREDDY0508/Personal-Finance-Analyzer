@@ -203,7 +203,7 @@ async def test_spending_by_category_empty(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     resp = await client.get("/api/v1/dashboard/spending-by-category", headers=headers)
     assert resp.status_code == 200
-    assert resp.json()["categories"] == []
+    assert resp.json() == []
 
 
 @pytest.mark.asyncio
@@ -211,7 +211,7 @@ async def test_spending_trend_empty(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     resp = await client.get("/api/v1/dashboard/spending-trend", headers=headers)
     assert resp.status_code == 200
-    assert isinstance(resp.json()["trend"], list)
+    assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio
@@ -219,7 +219,7 @@ async def test_savings_rate_empty(client: AsyncClient) -> None:
     headers = await _auth_headers(client)
     resp = await client.get("/api/v1/dashboard/savings-rate", headers=headers)
     assert resp.status_code == 200
-    assert isinstance(resp.json()["trend"], list)
+    assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio
@@ -267,7 +267,7 @@ async def test_spending_by_category_with_data(client: AsyncClient, db_session: A
         headers=headers,
     )
     assert resp.status_code == 200
-    categories = resp.json()["categories"]
+    categories = resp.json()
     assert len(categories) >= 4  # Housing, Groceries, Entertainment, Transportation
     cat_names = [c["category"] for c in categories]
     assert "Housing" in cat_names
