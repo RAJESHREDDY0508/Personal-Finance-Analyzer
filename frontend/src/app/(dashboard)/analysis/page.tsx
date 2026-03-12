@@ -113,7 +113,10 @@ function AnalysisContent() {
         .get(`/transactions?statement_id=${id}&limit=200`)
         .then((r) => {
           const raw = r.data;
-          const items = Array.isArray(raw?.items)
+          // Backend returns { transactions: [...], total: N }
+          const items = Array.isArray(raw?.transactions)
+            ? raw.transactions
+            : Array.isArray(raw?.items)
             ? raw.items
             : Array.isArray(raw)
             ? raw
