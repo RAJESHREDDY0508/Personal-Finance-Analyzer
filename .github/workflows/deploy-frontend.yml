@@ -77,20 +77,6 @@ jobs:
             --cache-control "public, max-age=0, must-revalidate" \
             --include "*.html"
 
-      - name: Invalidate CloudFront via Lambda
-        run: |
-          # Invoke the CDN Invalidator Lambda — it calls cloudfront:CreateInvalidation
-          # with the distribution ID baked into the function at deploy time.
-          FUNCTION_NAME="pfa-cdn-invalidator-${STAGE}"
-          RESULT=$(aws lambda invoke \
-            --function-name "$FUNCTION_NAME" \
-            --region "${AWS_REGION}" \
-            --payload '{}' \
-            /tmp/lambda_out.json \
-            --query 'StatusCode' --output text 2>&1)
-          echo "Lambda invoke status: $RESULT"
-          cat /tmp/lambda_out.json
-
       - name: Update Lambda code (keeps function in sync with repo)
         run: |
           # Re-zip and update the Lambda so it stays in sync with the repo code
@@ -102,6 +88,29 @@ jobs:
             --region "${AWS_REGION}" \
             --query "{FunctionName:FunctionName,LastModified:LastModified}" \
             --output json
+          # Wait for the update to finish before invoking
+          aws lambda wait function-updated \
+            --function-name "pfa-cdn-invalidator-${STAGE}" \
+            --region "${AWS_REGION}"
+
+      - name: Invalidate CloudFront via Lambda
+        run: |
+          # Invoke the CDN Invalidator Lambda — it calls cloudfront:CreateInvalidation
+          # --cli-binary-format raw-in-base64-out is required in AWS CLI v2 for --payload
+          FUNCTION_NAME="pfa-cdn-invalidator-${STAGE}"
+          aws lambda invoke \
+            --function-name "$FUNCTION_NAME" \
+            --region "${AWS_REGION}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{}' \
+            /tmp/lambda_out.json
+          echo "Lambda response:"
+          cat /tmp/lambda_out.json
+          # Fail the step if the Lambda itself returned an error
+          if grep -q '"errorMessage"' /tmp/lambda_out.json; then
+            echo "Lambda returned an error — see above"
+            exit 1
+          fi
 
       - name: Deployment summary
         run: |
