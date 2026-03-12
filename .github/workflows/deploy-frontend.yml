@@ -77,39 +77,34 @@ jobs:
             --cache-control "public, max-age=0, must-revalidate" \
             --include "*.html"
 
-      - name: Invalidate CloudFront cache
+      - name: Invalidate CloudFront via Lambda
         run: |
-          # Try SSM-stored distribution ID first (most reliable)
-          DISTRIBUTION_ID=$(aws ssm get-parameter \
-            --name "/pfa/${STAGE}/cloudfront-distribution-id" \
-            --query Parameter.Value --output text 2>/dev/null || echo "")
+          # Invoke the CDN Invalidator Lambda — it calls cloudfront:CreateInvalidation
+          # with the distribution ID baked into the function at deploy time.
+          FUNCTION_NAME="pfa-cdn-invalidator-${STAGE}"
+          RESULT=$(aws lambda invoke \
+            --function-name "$FUNCTION_NAME" \
+            --region "${AWS_REGION}" \
+            --payload '{}' \
+            /tmp/lambda_out.json \
+            --query 'StatusCode' --output text 2>&1)
+          echo "Lambda invoke status: $RESULT"
+          cat /tmp/lambda_out.json
 
-          # Fall back: CloudFormation stack output
-          if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
-            DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-              --stack-name PfaApp-${STAGE} \
-              --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-              --output text 2>/dev/null || echo "")
-          fi
-
-          # Last resort: list all distributions and pick the first
-          if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
-            DISTRIBUTION_ID=$(aws cloudfront list-distributions \
-              --query "DistributionList.Items[0].Id" \
-              --output text 2>/dev/null || echo "")
-          fi
-
-          if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
-            INVALIDATION_ID=$(aws cloudfront create-invalidation \
-              --distribution-id "$DISTRIBUTION_ID" \
-              --paths "/*" \
-              --query 'Invalidation.Id' --output text)
-            echo "CloudFront invalidation created: $INVALIDATION_ID for distribution $DISTRIBUTION_ID"
-          else
-            echo "WARNING: No CloudFront distribution found — skipping invalidation"
-          fi
+      - name: Update Lambda code (keeps function in sync with repo)
+        run: |
+          # Re-zip and update the Lambda so it stays in sync with the repo code
+          cd infrastructure/lambda/cdn_invalidator
+          zip -j cdn_invalidator.zip index.py
+          aws lambda update-function-code \
+            --function-name "pfa-cdn-invalidator-${STAGE}" \
+            --zip-file fileb://cdn_invalidator.zip \
+            --region "${AWS_REGION}" \
+            --query "{FunctionName:FunctionName,LastModified:LastModified}" \
+            --output json
 
       - name: Deployment summary
         run: |
           echo "✅ Frontend deployed to pfa-frontend-${STAGE}"
+          echo "✅ CloudFront invalidation triggered via Lambda"
           echo "Commit: ${{ github.sha }}"
